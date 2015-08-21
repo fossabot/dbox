@@ -1,5 +1,8 @@
+require 'case_insensitive_utils'
 module Dbox
   class Syncer
+    include CaseInsensitiveFile
+
     MIN_BYTES_TO_STREAM_DOWNLOAD = 1024 * 100 # 100kB
 
     include Loggable
@@ -82,6 +85,7 @@ module Dbox
       end
 
       def saving_timestamp(path)
+        path = CaseInsensitiveFile.resolve(path)
         mtime = File.mtime(path)
         res = yield
         File.utime(Time.now, mtime, path)
@@ -137,8 +141,8 @@ module Dbox
       end
 
       def generate_tmpfilename(path)
-        out = File.join(local_path, ".#{path.gsub(/\W/, '-')}.part")
-        if File.exists?(out)
+        out = CaseInsensitiveFile.join(local_path, ".#{path.gsub(/\W/, '-')}.part")
+        if CaseInsensitiveFile.exists?(out)
           generate_tmpfilename("path#{rand(1000)}")
         else
           out
@@ -146,7 +150,7 @@ module Dbox
       end
 
       def remove_tmpfiles
-        Dir["#{local_path}/.*.part"].each {|f| FileUtils.rm(f) }
+        Dir["#{local_path}/.*.part"].each {|f| CaseInsensitiveFile.rm(f) }
       end
 
       def sort_changelist(changelist)
@@ -337,7 +341,7 @@ module Dbox
         local_path = dir[:local_path]
         log.info "Creating #{local_path}"
         saving_parent_timestamp(dir) do
-          FileUtils.mkdir_p(local_path)
+          CaseInsensitiveFile.mkdir_p(local_path)
           update_file_timestamp(dir)
         end
       end
@@ -350,7 +354,7 @@ module Dbox
         local_path = dir[:local_path]
         log.info "Deleting #{local_path}"
         saving_parent_timestamp(dir) do
-          FileUtils.rm_r(local_path)
+          CaseInsensitiveFile.rm_r(local_path)
         end
       end
 
@@ -368,12 +372,13 @@ module Dbox
         local_path = file[:local_path]
         log.info "Deleting file: #{local_path}"
         saving_parent_timestamp(file) do
-          FileUtils.rm_rf(local_path)
+          CaseInsensitiveFile.rm_rf(local_path)
         end
       end
 
       def download_file(file)
-        local_path = file[:local_path]
+        local_path = CaseInsensitiveFile.resolve(file[:local_path])
+        local_path = CaseInsensitiveFile.join(File.dirname(local_path), File.basename(local_path))
         remote_path = file[:remote_path]
 
         # check to ensure we aren't overwriting an untracked file or a
@@ -382,7 +387,7 @@ module Dbox
         if entry = database.find_by_path(file[:path])
           clobbering = calculate_hash(local_path) != entry[:local_hash]
         else
-          clobbering = File.exists?(local_path)
+          clobbering = CaseInsensitiveFile.exists?(local_path)
         end
 
         # stream files larger than the minimum
@@ -390,20 +395,20 @@ module Dbox
 
         # download to temp file
         tmp = generate_tmpfilename(file[:path])
-        File.open(tmp, "wb") do |f|
+        CaseInsensitiveFile.open(tmp, "wb") do |f|
           api.get_file(remote_path, f, stream)
         end
 
         # rename old file if clobbering
-        if clobbering && File.exists?(local_path)
+        if clobbering && CaseInsensitiveFile.exists?(local_path)
           backup_path = find_nonconflicting_path(local_path)
-          FileUtils.mv(local_path, backup_path)
+          CaseInsensitiveFile.mv(local_path, backup_path)
           backup_relpath = local_to_relative_path(backup_path)
           log.warn "#{file[:path]} had a conflict and the existing copy was renamed to #{backup_relpath} locally"
         end
 
         # atomic move over to the real file, and update the timestamp
-        FileUtils.mv(tmp, local_path)
+        CaseInsensitiveFile.mv(tmp, local_path)
         update_file_timestamp(file)
 
         if backup_relpath
@@ -563,11 +568,11 @@ module Dbox
       end
 
       def mtime(path)
-        File.mtime(path)
+        File.mtime(CaseInsensitiveFile.resolve(path))
       end
 
       def is_dir(path)
-        File.directory?(path)
+        CaseInsensitiveFile.directory?(CaseInsensitiveFile.resolve(path))
       end
 
       def modified?(entry, res)
