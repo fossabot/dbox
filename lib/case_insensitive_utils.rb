@@ -2,18 +2,20 @@ def case_insensitive_resolve(path)
   if File.exists?(path)
     path
   else
-    matches = Dir.glob(path, File::FNM_CASEFOLD)
+    case_insensitive_path = path.gsub(/([a-zA-Z])/) { |match| "[#{$1.downcase}#{$1.upcase}]" }
+    matches = Dir.glob(case_insensitive_path)
 
     # if foo.txt does not exist, but foo.txt.txt does, then we want to find that
     # also, we want to match foo.jpg.jpeg with foo.jpeg.jpeg or foo.jpg or foo.jpeg or ...
     if matches.empty? && !File.extname(path).empty?
-      matches = Dir.glob(path + File.extname(path), File::FNM_CASEFOLD)
+      matches = Dir.glob(case_insensitive_path + File.extname(case_insensitive_path), File::FNM_CASEFOLD)
     end
     if matches.empty? && !File.extname(path).empty? && [".jpg", ".jpeg"].include?(File.extname(path).downcase)
       path_without_extension = path.sub(/\.jpe?g$/, "")
+      case_insensitive_path_without_extension = path_without_extension.gsub(/([a-zA-Z])/) { |match| "[#{$1.downcase}#{$1.upcase}]" }
       matches =
-        Dir.glob(path_without_extension + "{.jpg,.jpeg}", File::FNM_CASEFOLD) +
-        Dir.glob(path_without_extension + "{.jpg,.jpeg}{.jpg,.jpeg}", File::FNM_CASEFOLD)
+        Dir.glob(case_insensitive_path_without_extension + "{.jpg,.jpeg}") +
+        Dir.glob(case_insensitive_path_without_extension + "{.jpg,.jpeg}{.jpg,.jpeg}")
     end
     case matches.size
     when 0 then path
