@@ -150,7 +150,7 @@ module Dbox
       end
 
       def remove_tmpfiles
-        Dir["#{local_path}/.*.part"].each {|f| CaseInsensitiveFile.rm(f) }
+        Dir["#{local_path}/.*.part"].each {|f| CaseInsensitiveFile.rm_f(f) }
       end
 
       def sort_changelist(changelist)
@@ -354,7 +354,7 @@ module Dbox
         local_path = dir[:local_path]
         log.info "Deleting #{local_path}"
         saving_parent_timestamp(dir) do
-          CaseInsensitiveFile.rm_r(local_path)
+          CaseInsensitiveFile.rm_rf(local_path)
         end
       end
 
@@ -372,7 +372,7 @@ module Dbox
         local_path = file[:local_path]
         log.info "Deleting file: #{local_path}"
         saving_parent_timestamp(file) do
-          CaseInsensitiveFile.rm_rf(local_path)
+          CaseInsensitiveFile.rm_f(local_path)
         end
       end
 
