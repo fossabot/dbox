@@ -23,9 +23,9 @@ module Dbox
       Pull.new(database, api, params).execute
     end
 
-    def self.push(local_path)
+    def self.push(local_path, params = {})
       database = Database.load(local_path)
-      Push.new(database, api).execute
+      Push.new(database, api, params).execute
     end
 
     def self.move(new_remote_path, local_path)
@@ -438,8 +438,8 @@ module Dbox
     end
 
     class Push < Operation
-      def initialize(database, api)
-        super(database, api)
+      def initialize(database, api, params = {})
+        super(database, api, params)
       end
 
       def practice
@@ -544,6 +544,7 @@ module Dbox
 
         out = []
         recur_dirs = []
+        return out if remote_subdir && !dir[:path].empty? && dir[:remote_path] !~ /^#{remote_subdir}/
 
         existing_entries = current_dir_entries_as_hash(dir)
         child_paths = list_contents(dir).sort
