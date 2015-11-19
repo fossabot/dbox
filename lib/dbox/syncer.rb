@@ -18,9 +18,9 @@ module Dbox
       Pull.new(database, api).execute
     end
 
-    def self.pull(local_path)
+    def self.pull(local_path, params = {})
       database = Database.load(local_path)
-      Pull.new(database, api).execute
+      Pull.new(database, api, params).execute
     end
 
     def self.push(local_path)
@@ -44,9 +44,14 @@ module Dbox
 
       attr_reader :database
 
-      def initialize(database, api)
+      def initialize(database, api, params = {})
         @database = database
         @api = api
+        @params = params
+      end
+
+      def params
+        @params
       end
 
       def api
@@ -67,6 +72,14 @@ module Dbox
 
       def remove_dotfiles(contents)
         contents.reject {|c| File.basename(c[:path]).start_with?(".") }
+      end
+
+      def remote_subdir
+        params[:subdir] ? File.join(remote_path, params[:subdir]) : nil
+      end
+
+      def filter_to_subdir(contents)
+        contents.select { |c| c[:path].include?(remote_subdir) }
       end
 
       def current_dir_entries_as_hash(dir)
@@ -112,7 +125,9 @@ module Dbox
           out = process_basic_remote_props(res)
           out[:id] = entry[:id] if entry[:id]
           if res[:contents]
-            out[:contents] = remove_dotfiles(res[:contents]).map do |c|
+            contents = remove_dotfiles(res[:contents])
+            contents = filter_to_subdir(res[:contents]) if params[:subdir]
+            out[:contents] = contents.map do |c|
               o = process_basic_remote_props(c)
               o[:parent_id] = entry[:id] if entry[:id]
               o[:parent_path] = entry[:path]
@@ -169,8 +184,8 @@ module Dbox
     end
 
     class Pull < Operation
-      def initialize(database, api)
-        super(database, api)
+      def initialize(database, api, params = {})
+        super(database, api, params)
       end
 
       def practice
@@ -186,7 +201,6 @@ module Dbox
         log.debug "Executing changes:\n" + changes.map {|c| c.inspect }.join("\n")
         parent_ids_of_failed_entries = []
         changelist = { :created => [], :deleted => [], :updated => [], :failed => [] }
-
         changes.each do |op, c|
           case op
           when :create
@@ -264,6 +278,7 @@ module Dbox
 
         out = []
         recur_dirs = []
+        return out if remote_subdir && !dir[:path].empty? && dir[:remote_path] !~ /^#{remote_subdir}/
 
         # grab the metadata for the current dir (either off the filesystem or from Dropbox)
         res = gather_remote_info(dir)
@@ -311,7 +326,9 @@ module Dbox
           end
 
           # add any deletions
-          out += case_insensitive_difference(existing_entries.keys, found_paths).map do |p|
+          dirs = case_insensitive_difference(existing_entries.keys, found_paths)
+          dirs = dirs.select { |file| file =~ /^#{params[:subdir]}/ } if params[:subdir]
+          out += dirs.map do |p|
             [:delete, existing_entries[p]]
           end
         end
