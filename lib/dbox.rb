@@ -31,12 +31,12 @@ module Dbox
     Dbox::Syncer.create(remote_path, local_path)
   end
 
-  def self.clone(remote_path, local_path)
+  def self.clone(remote_path, local_path, params = {})
     log.debug "Cloning (remote: #{remote_path}, local: #{local_path})"
     remote_path = clean_remote_path(remote_path)
     local_path = clean_local_path(local_path)
     migrate_dbfile(local_path)
-    Dbox::Syncer.clone(remote_path, local_path)
+    Dbox::Syncer.clone(remote_path, local_path, params)
   end
 
   def self.pull(local_path, params = {})

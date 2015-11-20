@@ -12,10 +12,10 @@ module Dbox
       clone(remote_path, local_path)
     end
 
-    def self.clone(remote_path, local_path)
+    def self.clone(remote_path, local_path, params = {})
       api.metadata(remote_path) # ensure remote exists
       database = Database.create(remote_path, local_path)
-      Pull.new(database, api).execute
+      Pull.new(database, api, params).execute
     end
 
     def self.pull(local_path, params = {})
