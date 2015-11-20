@@ -10,7 +10,7 @@ describe Dbox do
   end
 
   before(:each) do
-    log.info example.full_description
+    # log.info example.full_description
     @name = randname()
     @local = File.join(LOCAL_TEST_PATH, @name)
     @remote = File.join(REMOTE_TEST_PATH, @name)
