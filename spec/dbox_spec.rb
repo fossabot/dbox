@@ -215,7 +215,7 @@ describe Dbox do
       res[:failed].should eql([])
       c = (res[:conflicts] == [{:original => "goodbye.txt", :renamed => "goodbye (4).txt"}, {:original => "hello (1).txt", :renamed => "hello (5).txt"}, {:original => "hello.txt", :renamed => "hello (2).txt"}]) ||
         (res[:conflicts] == [{:original => "goodbye.txt", :renamed => "goodbye (4).txt"}, {:original => "hello (1).txt", :renamed => "hello (2).txt"}, {:original => "hello.txt", :renamed => "hello (5).txt"}])
-      c.should be_true
+      c.should be true
     end
   end
 
@@ -618,18 +618,18 @@ describe Dbox do
 
   describe "#exists?" do
     it "should be false if the local dir is missing" do
-      Dbox.exists?(@local).should be_false
+      Dbox.exists?(@local).should be false
     end
 
     it "should be true if the dir exists" do
       Dbox.create(@remote, @local)
-      Dbox.exists?(@local).should be_true
+      Dbox.exists?(@local).should be true
     end
 
     it "should be false if the dir exists but is missing a .dbox.sqlite3 file" do
       Dbox.create(@remote, @local)
       rm "#{@local}/.dbox.sqlite3"
-      Dbox.exists?(@local).should be_false
+      Dbox.exists?(@local).should be false
     end
   end
 
