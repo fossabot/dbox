@@ -70,8 +70,18 @@ module Dbox
         metadata[:remote_path]
       end
 
+      def blacklisted_extensions
+        params[:blacklisted_extensions]
+      end
+
       def remove_dotfiles(contents)
         contents.reject {|c| File.basename(c[:path]).start_with?(".") }
+      end
+
+      def remove_blacklisted_extensions(contents)
+        return contents unless blacklisted_extensions
+        # puts "looking for blacklisted extensions #{blacklisted_extensions} in\n#{contents.inspect}"
+        contents.reject { |c| !c[:is_dir] && blacklisted_extensions.include?(File.extname(c[:path]).downcase) }
       end
 
       def remote_subdir
@@ -79,6 +89,7 @@ module Dbox
       end
 
       def filter_to_subdir(contents)
+        return contents unless remote_subdir
         contents.select { |c| c[:path].include?(remote_subdir) }
       end
 
@@ -126,7 +137,8 @@ module Dbox
           out[:id] = entry[:id] if entry[:id]
           if res[:contents]
             contents = remove_dotfiles(res[:contents])
-            contents = filter_to_subdir(res[:contents]) if params[:subdir]
+            contents = filter_to_subdir(contents)
+            contents = remove_blacklisted_extensions(contents)
             out[:contents] = contents.map do |c|
               o = process_basic_remote_props(c)
               o[:parent_id] = entry[:id] if entry[:id]
