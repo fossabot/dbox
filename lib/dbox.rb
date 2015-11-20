@@ -39,33 +39,33 @@ module Dbox
     Dbox::Syncer.clone(remote_path, local_path)
   end
 
-  def self.pull(local_path)
+  def self.pull(local_path, params = {})
     log.debug "Pulling (local: #{local_path})"
     local_path = clean_local_path(local_path)
     migrate_dbfile(local_path)
-    Dbox::Syncer.pull(local_path)
+    Dbox::Syncer.pull(local_path, params)
   end
 
-  def self.clone_or_pull(remote_path, local_path)
+  def self.clone_or_pull(remote_path, local_path, params = {})
     if exists?(local_path)
-      pull(local_path)
+      pull(local_path, params)
     else
       clone(remote_path, local_path)
     end
   end
 
-  def self.push(local_path)
+  def self.push(local_path, params = {})
     log.debug "Pushing (local: #{local_path})"
     local_path = clean_local_path(local_path)
     migrate_dbfile(local_path)
-    Dbox::Syncer.push(local_path)
+    Dbox::Syncer.push(local_path, params)
   end
 
-  def self.sync(local_path)
+  def self.sync(local_path, params = {})
     log.debug "Syncing (local: #{local_path})"
     res = {}
-    res[:pull] = pull(local_path)
-    res[:push] = push(local_path)
+    res[:pull] = pull(local_path, params)
+    res[:push] = push(local_path, params)
     res
   end
 
