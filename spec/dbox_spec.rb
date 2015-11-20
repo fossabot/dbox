@@ -217,6 +217,42 @@ describe Dbox do
           (res[:conflicts] == [{ original: 'goodbye.txt', renamed: 'goodbye (4).txt' }, { original: 'hello (1).txt', renamed: 'hello (2).txt' }, { original: 'hello.txt', renamed: 'hello (5).txt' }])
       expect(c).to be true
     end
+
+    context 'with a subdirectory specified' do
+      before do
+        Dbox.create(@remote, @local)
+        @alternate = "#{ALTERNATE_LOCAL_TEST_PATH}/#{@name}"
+        Dbox.clone(@remote, @alternate)
+        FileUtils.mkdir_p(File.join(@local, 'dir1'))
+        FileUtils.mkdir_p(File.join(@local, 'dir2'))
+        make_file "#{@local}/dir1/hello.txt"
+        make_file "#{@local}/dir2/goodbye.txt"
+        Dbox.push(@local)
+        Dbox.pull(@alternate, subdir: 'dir1')
+      end
+
+      it 'should pull only from that subdirectory' do
+        expect("#{@alternate}/dir1").to exist
+        expect("#{@alternate}/dir1/hello.txt").to exist
+        expect("#{@alternate}/dir2").to_not exist
+        expect("#{@alternate}/dir2").to_not exist
+      end
+
+      context 'and then pulling again without specifying a subdirectory' do
+        it 'should pull all the subdirectories' do
+          expect("#{@alternate}/dir1").to exist
+          expect("#{@alternate}/dir1/hello.txt").to exist
+          expect("#{@alternate}/dir2").to_not exist
+          expect("#{@alternate}/dir2").to_not exist
+
+          Dbox.pull(@alternate)
+          expect("#{@alternate}/dir1").to exist
+          expect("#{@alternate}/dir1/hello.txt").to exist
+          expect("#{@alternate}/dir2").to exist
+          expect("#{@alternate}/dir2").to exist
+        end
+      end
+    end
   end
 
   describe '#clone_or_pull' do
