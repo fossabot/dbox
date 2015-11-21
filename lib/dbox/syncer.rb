@@ -80,7 +80,6 @@ module Dbox
 
       def remove_blacklisted_extensions(contents)
         return contents unless blacklisted_extensions
-        # puts "looking for blacklisted extensions #{blacklisted_extensions} in\n#{contents.inspect}"
         contents.reject { |c| !c[:is_dir] && blacklisted_extensions.include?(File.extname(c[:path]).downcase) }
       end
 
@@ -137,7 +136,7 @@ module Dbox
           out[:id] = entry[:id] if entry[:id]
           if res[:contents]
             contents = remove_dotfiles(res[:contents])
-            contents = filter_to_subdir(contents)
+            # contents = filter_to_subdir(contents)
             contents = remove_blacklisted_extensions(contents)
             out[:contents] = contents.map do |c|
               o = process_basic_remote_props(c)
@@ -210,18 +209,26 @@ module Dbox
         remove_tmpfiles
         dir = database.root_dir
         changes = calculate_changes(dir)
-        log.debug "Executing changes:\n" + changes.map {|c| c.inspect }.join("\n")
+        log.debug "Executing changes:\n" + changes.map {|c| c.inspect }.join("\n")  
         parent_ids_of_failed_entries = []
         changelist = { :created => [], :deleted => [], :updated => [], :failed => [] }
         changes.each do |op, c|
+          # if c[:path].length > 0 && remote_subdir && !c[:remote_path].include?(remote_subdir)
+          # We want to include paths up to and including the remote_subdir, and also paths that have the remote_subdir as their root
+          if remote_subdir && !(c[:remote_path].index(remote_subdir) == 0 || remote_subdir.index(c[:remote_path]) == 0)
+            if op == :create && c[:is_dir] && !database.find_by_path(c[:path])
+              database.add_entry(c[:path], true, c[:parent_id], c[:modified], c[:revision], nil, nil)
+            end
+            next
+          end
           case op
           when :create
             c[:parent_id] ||= lookup_id_by_path(c[:parent_path])
             if c[:is_dir]
-              # create the local directory
               create_dir(c)
-              database.add_entry(c[:path], true, c[:parent_id], c[:modified], c[:revision], c[:remote_hash], nil)
+              database.find_by_path(c[:path]) ? database.update_entry_by_path(c[:path], :modified => c[:modified], :revision => c[:revision], :remote_hash => c[:remote_hash]) : database.add_entry(c[:path], true, c[:parent_id], c[:modified], c[:revision], c[:remote_hash], nil)
               changelist[:created] << c[:path]
+            # create the local directory
             else
               # download the new file
               begin
@@ -242,6 +249,7 @@ module Dbox
           when :update
             if c[:is_dir]
               # update the local directory
+              create_dir(c)
               update_dir(c)
               database.update_entry_by_path(c[:path], :modified => c[:modified], :revision => c[:revision], :remote_hash => c[:remote_hash])
               changelist[:updated] << c[:path]
@@ -290,7 +298,7 @@ module Dbox
 
         out = []
         recur_dirs = []
-        return out if remote_subdir && !dir[:path].empty? && dir[:remote_path] !~ /^#{remote_subdir}/
+        # return out if remote_subdir && !dir[:path].empty? && dir[:remote_path] !~ /^#{remote_subdir}/
 
         # grab the metadata for the current dir (either off the filesystem or from Dropbox)
         res = gather_remote_info(dir)
@@ -556,7 +564,7 @@ module Dbox
 
         out = []
         recur_dirs = []
-        return out if remote_subdir && !dir[:path].empty? && dir[:remote_path] !~ /^#{remote_subdir}/
+        # return out if remote_subdir && !dir[:path].empty? && dir[:remote_path] !~ /^#{remote_subdir}/
 
         existing_entries = current_dir_entries_as_hash(dir)
         child_paths = list_contents(dir).sort
