@@ -5,6 +5,7 @@ gem 'oauth', '>= 0.4.5'
 gem 'json', '>= 1.5.3'
 gem 'sqlite3', '>= 1.3.3'
 gem 'dropbox-sdk', '>= 1.6.2'
+gem 'thor'
 
 group :development do
   gem 'jeweler'

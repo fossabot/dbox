@@ -11,7 +11,7 @@ Gem::Specification.new do |s|
   s.required_rubygems_version = Gem::Requirement.new(">= 0") if s.respond_to? :required_rubygems_version=
   s.require_paths = ["lib"]
   s.authors = ["Ken Pratt"]
-  s.date = "2015-03-03"
+  s.date = "2015-11-23"
   s.description = "An easy-to-use Dropbox client with fine-grained control over syncs. Think of it as halfway point between the developer API and a normal client, which gives you control over what and when Dropbox syncs but handles all the details."
   s.email = "ken@kenpratt.net"
   s.executables = ["dbox"]
@@ -21,6 +21,7 @@ Gem::Specification.new do |s|
   ]
   s.files = [
     ".document",
+    ".rspec",
     "Gemfile",
     "History.txt",
     "LICENSE.txt",
@@ -30,6 +31,7 @@ Gem::Specification.new do |s|
     "VERSION",
     "bin/dbox",
     "dbox.gemspec",
+    "lib/case_insensitive_utils.rb",
     "lib/dbox.rb",
     "lib/dbox/api.rb",
     "lib/dbox/database.rb",
@@ -44,7 +46,7 @@ Gem::Specification.new do |s|
   ]
   s.homepage = "http://github.com/kenpratt/dbox"
   s.licenses = ["MIT"]
-  s.rubygems_version = "2.2.2"
+  s.rubygems_version = "2.4.5.1"
   s.summary = "Dropbox made easy."
 
   if s.respond_to? :specification_version then
@@ -56,6 +58,7 @@ Gem::Specification.new do |s|
       s.add_runtime_dependency(%q<json>, [">= 1.5.3"])
       s.add_runtime_dependency(%q<sqlite3>, [">= 1.3.3"])
       s.add_runtime_dependency(%q<dropbox-sdk>, [">= 1.6.2"])
+      s.add_runtime_dependency(%q<thor>, [">= 0"])
       s.add_development_dependency(%q<jeweler>, [">= 0"])
     else
       s.add_dependency(%q<multipart-post>, [">= 1.1.2"])
@@ -63,6 +66,7 @@ Gem::Specification.new do |s|
       s.add_dependency(%q<json>, [">= 1.5.3"])
       s.add_dependency(%q<sqlite3>, [">= 1.3.3"])
       s.add_dependency(%q<dropbox-sdk>, [">= 1.6.2"])
+      s.add_dependency(%q<thor>, [">= 0"])
       s.add_dependency(%q<jeweler>, [">= 0"])
     end
   else
@@ -71,6 +75,7 @@ Gem::Specification.new do |s|
     s.add_dependency(%q<json>, [">= 1.5.3"])
     s.add_dependency(%q<sqlite3>, [">= 1.3.3"])
     s.add_dependency(%q<dropbox-sdk>, [">= 1.6.2"])
+    s.add_dependency(%q<thor>, [">= 0"])
     s.add_dependency(%q<jeweler>, [">= 0"])
   end
 end
