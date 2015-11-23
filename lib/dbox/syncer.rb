@@ -213,7 +213,6 @@ module Dbox
         parent_ids_of_failed_entries = []
         changelist = { :created => [], :deleted => [], :updated => [], :failed => [] }
         changes.each do |op, c|
-          # if c[:path].length > 0 && remote_subdir && !c[:remote_path].include?(remote_subdir)
           # We want to include paths up to and including the remote_subdir, and also paths that have the remote_subdir as their root
           if remote_subdir && !(c[:remote_path].index(remote_subdir) == 0 || remote_subdir.index(c[:remote_path]) == 0)
             if op == :create && c[:is_dir] && !database.find_by_path(c[:path])
@@ -475,6 +474,14 @@ module Dbox
         changelist = { :created => [], :deleted => [], :updated => [], :failed => [] }
 
         changes.each do |op, c|
+          # We want to include paths up to and including the remote_subdir, and also paths that have the remote_subdir as their root
+          if remote_subdir && !(c[:remote_path].index(remote_subdir) == 0 || remote_subdir.index(c[:remote_path]) == 0)
+            if op == :create && c[:is_dir] && !database.find_by_path(c[:path])
+              database.add_entry(c[:path], true, c[:parent_id], c[:modified], c[:revision], nil, nil)
+            end
+            next
+          end
+
           case op
           when :create
             c[:parent_id] ||= lookup_id_by_path(c[:parent_path])
@@ -482,7 +489,7 @@ module Dbox
             if c[:is_dir]
               # create the remote directiory
               create_dir(c)
-              database.add_entry(c[:path], true, c[:parent_id], nil, nil, nil, nil)
+              database.find_by_path(c[:path]) ? database.update_entry_by_path(c[:path], :modified => c[:modified], :revision => c[:revision], :remote_hash => c[:remote_hash]) : database.add_entry(c[:path], true, c[:parent_id], nil, nil, nil, nil)
               force_metadata_update_from_server(c)
               changelist[:created] << c[:path]
             else
