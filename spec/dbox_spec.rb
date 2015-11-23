@@ -607,12 +607,13 @@ describe Dbox do
                                        push: { created: ['foo', 'foo/hello.txt'], deleted: [], updated: [], failed: [] })
       rm_rf "#{@local}/foo"
       expect(Dbox.sync(@local)).to eql(pull: { created: [], deleted: [], updated: ['', 'foo'], failed: [] },
-                                       push: { created: [], deleted: ['foo'], updated: [], failed: [] })
+                                       push: { created: [], deleted: ['foo/hello.txt'], updated: [], failed: [] })
+      rm_rf "#{@local}/foo"
       mkdir "#{@local}/FOO"
       make_file "#{@local}/FOO/HELLO.txt"
-      expect(Dbox.sync(@local)).to eql(pull: { created: [], deleted: [], updated: [''], failed: [] },
-                                       push: { created: ['FOO', 'FOO/HELLO.txt'], deleted: [], updated: [], failed: [] })
-      expect(Dbox.sync(@local)).to eql(pull: { created: [], deleted: [], updated: ['', 'FOO'], failed: [] },
+      expect(Dbox.sync(@local)).to eql(pull: { created: [], deleted: [], updated: ['foo'], failed: [] },
+                                       push: { created: ['FOO/HELLO.txt'], deleted: [], updated: [], failed: [] })
+      expect(Dbox.sync(@local)).to eql(pull: { created: [], deleted: [], updated: ['foo'], failed: [] },
                                        push: { created: [], deleted: [], updated: [], failed: [] })
     end
 
