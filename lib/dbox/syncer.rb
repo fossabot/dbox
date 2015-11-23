@@ -209,7 +209,7 @@ module Dbox
         remove_tmpfiles
         dir = database.root_dir
         changes = calculate_changes(dir)
-        log.debug "Executing changes:\n" + changes.map {|c| c.inspect }.join("\n")  
+        log.debug "Executing changes:\n" + changes.map {|c| c.inspect }.join("\n")
         parent_ids_of_failed_entries = []
         changelist = { :created => [], :deleted => [], :updated => [], :failed => [] }
         changes.each do |op, c|
@@ -376,6 +376,7 @@ module Dbox
       def create_dir(dir)
         local_path = dir[:local_path]
         log.info "Creating #{local_path}"
+        return if CaseInsensitiveFile.exists?(local_path)
         saving_parent_timestamp(dir) do
           CaseInsensitiveFile.mkdir_p(local_path)
           update_file_timestamp(dir)
