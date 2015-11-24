@@ -294,6 +294,48 @@ describe Dbox do
         end
       end
     end
+
+    context 'with two subdirectories specified' do
+      before do
+        Dbox.create(@remote, @local)
+        @alternate = "#{ALTERNATE_LOCAL_TEST_PATH}/#{@name}"
+        Dbox.clone(@remote, @alternate)
+
+        FileUtils.mkdir_p(File.join(@local, 'dir1/dir1a'))
+        FileUtils.mkdir_p(File.join(@local, 'dir2/dir2a'))
+        FileUtils.mkdir_p(File.join(@local, 'dir3/dir3a'))
+        make_file "#{@local}/dir1/hello.txt"
+        make_file "#{@local}/dir1/dir1a/hello.txt"
+        make_file "#{@local}/dir2/goodbye.txt"
+        make_file "#{@local}/dir2/dir2a/goodbye.txt"
+        make_file "#{@local}/dir3/dir3a/wave.txt"
+        Dbox.push(@local)
+        Dbox.pull(@alternate, subdir: 'dir1,dir2')
+      end
+
+      it 'should pull only from those subdirectories' do
+        expect("#{@alternate}/dir1").to exist
+        expect("#{@alternate}/dir1/hello.txt").to exist
+        expect("#{@alternate}/dir1/dir1a/hello.txt").to exist
+        expect("#{@alternate}/dir2").to exist
+        expect("#{@alternate}/dir2/goodbye.txt").to exist
+        expect("#{@alternate}/dir3").to_not exist
+        expect("#{@alternate}/dir3/dir3a/wave.txt").to_not exist
+      end
+
+      context 'and then pulling again without specifying a subdirectory' do
+        it 'should pull all the subdirectories' do
+          Dbox.pull(@alternate)
+          expect("#{@alternate}/dir1").to exist
+          expect("#{@alternate}/dir1/hello.txt").to exist
+          expect("#{@alternate}/dir1/dir1a/hello.txt").to exist
+          expect("#{@alternate}/dir2").to exist
+          expect("#{@alternate}/dir2/goodbye.txt").to exist
+          expect("#{@alternate}/dir3").to exist
+          expect("#{@alternate}/dir3/dir3a/wave.txt").to exist
+        end
+      end
+    end
   end
 
   describe '#clone_or_pull' do
@@ -561,6 +603,49 @@ describe Dbox do
           expect("#{@alternate}/dir1/dir1a/hello.txt").to exist
           expect("#{@alternate}/dir2/dir2a").to exist
           expect("#{@alternate}/dir2/dir2a/goodbye.txt").to exist
+        end
+      end
+    end
+
+    context 'with two subdirectories specified' do
+      before do
+        Dbox.create(@remote, @local)
+        @alternate = "#{ALTERNATE_LOCAL_TEST_PATH}/#{@name}"
+        Dbox.clone(@remote, @alternate)
+
+        FileUtils.mkdir_p(File.join(@local, 'dir1/dir1a'))
+        FileUtils.mkdir_p(File.join(@local, 'dir2/dir2a'))
+        FileUtils.mkdir_p(File.join(@local, 'dir3/dir3a'))
+        make_file "#{@local}/dir1/hello.txt"
+        make_file "#{@local}/dir1/dir1a/hello.txt"
+        make_file "#{@local}/dir2/goodbye.txt"
+        make_file "#{@local}/dir2/dir2a/goodbye.txt"
+        make_file "#{@local}/dir3/dir3a/wave.txt"
+        Dbox.push(@local, subdir: 'dir1,dir2')
+        Dbox.pull(@alternate)
+      end
+
+      it 'should only push to those directories' do
+        expect("#{@alternate}/dir1").to exist
+        expect("#{@alternate}/dir1/hello.txt").to exist
+        expect("#{@alternate}/dir1/dir1a/hello.txt").to exist
+        expect("#{@alternate}/dir2").to exist
+        expect("#{@alternate}/dir2/goodbye.txt").to exist
+        expect("#{@alternate}/dir3").to_not exist
+        expect("#{@alternate}/dir3/dir3a/wave.txt").to_not exist
+      end
+
+      context 'and then pushing again without specifying a subdirectory' do
+        it 'should push to all the subdirectories' do
+          Dbox.push(@local)
+          Dbox.pull(@alternate)
+          expect("#{@alternate}/dir1").to exist
+          expect("#{@alternate}/dir1/hello.txt").to exist
+          expect("#{@alternate}/dir1/dir1a/hello.txt").to exist
+          expect("#{@alternate}/dir2").to exist
+          expect("#{@alternate}/dir2/goodbye.txt").to exist
+          expect("#{@alternate}/dir3").to exist
+          expect("#{@alternate}/dir3/dir3a/wave.txt").to exist
         end
       end
     end

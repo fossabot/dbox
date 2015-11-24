@@ -83,13 +83,11 @@ module Dbox
         contents.reject { |c| !c[:is_dir] && blacklisted_extensions.include?(File.extname(c[:path]).downcase) }
       end
 
-      def remote_subdir
-        params[:subdir] ? File.join(remote_path, params[:subdir]) : nil
-      end
-
-      def filter_to_subdir(contents)
-        return contents unless remote_subdir
-        contents.select { |c| c[:path].include?(remote_subdir) }
+      def remote_subdirs
+        return unless params[:subdir]
+        params[:subdir].split(/,/).map do |dir|
+          File.join(remote_path, dir)
+        end
       end
 
       def current_dir_entries_as_hash(dir)
@@ -136,7 +134,6 @@ module Dbox
           out[:id] = entry[:id] if entry[:id]
           if res[:contents]
             contents = remove_dotfiles(res[:contents])
-            # contents = filter_to_subdir(contents)
             contents = remove_blacklisted_extensions(contents)
             out[:contents] = contents.map do |c|
               o = process_basic_remote_props(c)
@@ -213,8 +210,8 @@ module Dbox
         parent_ids_of_failed_entries = []
         changelist = { :created => [], :deleted => [], :updated => [], :failed => [] }
         changes.each do |op, c|
-          # We want to include paths up to and including the remote_subdir, and also paths that have the remote_subdir as their root
-          if remote_subdir && !(c[:remote_path].index(remote_subdir) == 0 || remote_subdir.index(c[:remote_path]) == 0)
+          # We want to include paths up to and including the remote_subdirs, and also paths that have the remote_subdirs as their root
+          if remote_subdirs && !remote_subdirs.any? {|dir| c[:remote_path].index(dir) == 0 || dir.index(c[:remote_path]) == 0}
             if op == :create && c[:is_dir] && !database.find_by_path(c[:path])
               database.add_entry(c[:path], true, c[:parent_id], c[:modified], c[:revision], nil, nil)
             end
@@ -297,7 +294,6 @@ module Dbox
 
         out = []
         recur_dirs = []
-        # return out if remote_subdir && !dir[:path].empty? && dir[:remote_path] !~ /^#{remote_subdir}/
 
         # grab the metadata for the current dir (either off the filesystem or from Dropbox)
         res = gather_remote_info(dir)
@@ -475,8 +471,8 @@ module Dbox
         changelist = { :created => [], :deleted => [], :updated => [], :failed => [] }
 
         changes.each do |op, c|
-          # We want to include paths up to and including the remote_subdir, and also paths that have the remote_subdir as their root
-          if remote_subdir && !(c[:remote_path].index(remote_subdir) == 0 || remote_subdir.index(c[:remote_path]) == 0)
+          # We want to include paths up to and including the remote_subdirs, and also paths that have the remote_subdirs as their root
+          if remote_subdirs && !remote_subdirs.any? {|dir| c[:remote_path].index(dir) == 0 || dir.index(c[:remote_path]) == 0}
             if op == :create && c[:is_dir] && !database.find_by_path(c[:path])
               database.add_entry(c[:path], true, c[:parent_id], c[:modified], c[:revision], nil, nil)
             end
@@ -572,7 +568,6 @@ module Dbox
 
         out = []
         recur_dirs = []
-        # return out if remote_subdir && !dir[:path].empty? && dir[:remote_path] !~ /^#{remote_subdir}/
 
         existing_entries = current_dir_entries_as_hash(dir)
         child_paths = list_contents(dir).sort
