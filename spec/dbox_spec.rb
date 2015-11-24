@@ -258,6 +258,20 @@ describe Dbox do
           expect("#{@alternate}/dir2/dir2a/goodbye.txt").to exist
         end
       end
+
+      context "and deleting a file and pulling again" do
+        it 'should delete the file locally too' do
+          rm_rf "#{@local}/dir1/hello.txt"
+          Dbox.push(@local)
+
+          Dbox.pull(@alternate, subdir: 'dir1')
+          expect("#{@alternate}/dir1").to exist
+          expect("#{@alternate}/dir1/hello.txt").to_not exist
+          expect("#{@alternate}/dir1/dir1a/hello.txt").to exist
+          expect("#{@alternate}/dir2").to_not exist
+          expect("#{@alternate}/dir2/goodbye.txt").to_not exist
+        end
+      end
     end
 
     context 'with a two-level subdirectory specified' do
@@ -295,7 +309,7 @@ describe Dbox do
       end
     end
 
-    context 'with two subdirectories specified' do
+    context 'with two comma-delimited subdirectories specified' do
       before do
         Dbox.create(@remote, @local)
         @alternate = "#{ALTERNATE_LOCAL_TEST_PATH}/#{@name}"
@@ -321,6 +335,22 @@ describe Dbox do
         expect("#{@alternate}/dir2/goodbye.txt").to exist
         expect("#{@alternate}/dir3").to_not exist
         expect("#{@alternate}/dir3/dir3a/wave.txt").to_not exist
+      end
+
+      context "and deleting a file and pulling again" do
+        it 'should delete the file locally too' do
+          rm_rf "#{@local}/dir1/hello.txt"
+          Dbox.push(@local)
+
+          Dbox.pull(@alternate, subdir: 'dir1,dir2')
+          expect("#{@alternate}/dir1").to exist
+          expect("#{@alternate}/dir1/hello.txt").to_not exist
+          expect("#{@alternate}/dir1/dir1a/hello.txt").to exist
+          expect("#{@alternate}/dir2").to exist
+          expect("#{@alternate}/dir2/goodbye.txt").to exist
+          expect("#{@alternate}/dir3").to_not exist
+          expect("#{@alternate}/dir3/dir3a/wave.txt").to_not exist
+        end
       end
 
       context 'and then pulling again without specifying a subdirectory' do
@@ -918,6 +948,81 @@ describe Dbox do
       Dbox.delete(@remote, @local)
       expect(@local).to_not exist
       expect { Dbox.clone(@remote, @local) }.to raise_error(Dbox::RemoteMissing)
+    end
+  end
+
+  describe 'multiple pushes and pulls' do
+    it 'should not get out of sync' do
+      Dbox.create(@remote, @local)
+      @alternate = "#{ALTERNATE_LOCAL_TEST_PATH}/#{@name}"
+      Dbox.clone(@remote, @alternate)
+
+      # Make some files and pull them from Dropbox
+      FileUtils.mkdir_p(File.join(@local, 'dir1/dir1a'))
+      FileUtils.mkdir_p(File.join(@local, 'dir2/dir2a'))
+      make_file "#{@local}/dir1/hello.txt"
+      make_file "#{@local}/dir1/dir1a/hello.txt"
+      make_file "#{@local}/dir2/goodbye.txt"
+      make_file "#{@local}/dir2/dir2a/goodbye.txt"
+      Dbox.push(@local)
+
+      # Make some local changes and push them
+      Dbox.pull(@alternate)
+      make_file "#{@alternate}/dir1/from_alternate.txt"
+      Dbox.push(@alternate)
+
+      # Make more changes in Dropbox
+      make_file "#{@local}/dir1/from_local.txt"
+      Dbox.push(@local)
+      Dbox.pull(@alternate)
+      Dbox.pull(@local)
+
+      Find.find(@local) do |path|
+        expect(path.sub(/test_dirs/, 'test_dirs/alternate')).to exist
+      end
+
+      Find.find(@alternate) do |path|
+        expect(path.sub(/alternate\//, '')).to exist
+      end
+    end
+
+    context 'with subdirectories' do
+      it 'should not get out of sync' do
+        Dbox.create(@remote, @local)
+        @alternate = "#{ALTERNATE_LOCAL_TEST_PATH}/#{@name}"
+        Dbox.clone(@remote, @alternate)
+
+        # Make some files and pull them from Dropbox
+        FileUtils.mkdir_p(File.join(@local, 'dir1/dir1a'))
+        make_file "#{@local}/dir1/hello.txt"
+        make_file "#{@local}/dir1/dir1a/hello2.txt"
+        Dbox.push(@local)
+
+        # Make some local changes and push them
+        Dbox.pull(@alternate, subdir: 'dir1')
+        FileUtils.mkdir_p(File.join(@alternate, 'dir2/dir2a'))
+        make_file "#{@alternate}/dir2/from_alternate.txt"
+        make_file "#{@alternate}/dir2/goodbye.txt"
+        make_file "#{@alternate}/dir2/dir2a/goodbye.txt"
+        make_file "#{@alternate}/dir1/something.txt"
+        Dbox.push(@alternate, subdir: 'dir2')
+
+        # Make more changes in Dropbox
+        make_file "#{@local}/dir1/from_local.txt"
+        FileUtils.rm("#{@local}/dir1/hello.txt")
+        Dbox.push(@local)
+        Dbox.pull(@alternate, subdir: 'dir1')
+        Dbox.pull(@local)
+
+        Find.find(@local) do |path|
+          expect(path.sub(/test_dirs/, 'test_dirs/alternate')).to exist
+        end
+
+        Find.find(@alternate) do |path|
+          next if File.basename(path) == 'something.txt'
+          expect(path.sub(/alternate\//, '')).to exist
+        end
+      end
     end
   end
 end

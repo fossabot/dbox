@@ -3,6 +3,7 @@ $LOAD_PATH.unshift(File.dirname(__FILE__))
 require "rspec"
 require "dbox"
 require "fileutils"
+require 'find'
 
 LOCAL_TEST_PATH = File.expand_path(File.join(File.dirname(__FILE__), "..", "tmp", "test_dirs"))
 ALTERNATE_LOCAL_TEST_PATH = File.join(LOCAL_TEST_PATH, "alternate")

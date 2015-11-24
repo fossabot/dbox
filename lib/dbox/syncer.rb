@@ -90,6 +90,11 @@ module Dbox
         end
       end
 
+      def local_subdirs
+        return unless params[:subdir]
+        params[:subdir].split(/,/)
+      end
+
       def current_dir_entries_as_hash(dir)
         if dir[:id]
           out = InsensitiveHash.new
@@ -342,7 +347,7 @@ module Dbox
 
           # add any deletions
           dirs = case_insensitive_difference(existing_entries.keys, found_paths)
-          dirs = dirs.select { |file| file =~ /^#{params[:subdir]}/ } if params[:subdir]
+          dirs = dirs.select { |file| local_subdirs.any? { |dir| file =~ /^#{dir}/ }} if local_subdirs
           out += dirs.map do |p|
             [:delete, existing_entries[p]]
           end
