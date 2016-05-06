@@ -94,6 +94,13 @@ module Dbox
     end
   end
 
+  def self.list(remote_path)
+    files = Dbox.metadata(remote_path)
+    files['contents'].each do |file|
+      puts file['path'][/[^\/]+$/]
+    end
+  end
+
   def self.metadata(remote_path)
     log.debug "Getting metadata for #{remote_path}"
     remote_path = clean_remote_path(remote_path)
