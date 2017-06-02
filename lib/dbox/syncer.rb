@@ -132,7 +132,7 @@ module Dbox
       end
 
       def gather_remote_info(entry)
-        res = api.metadata(entry[:remote_path], entry[:remote_hash])
+        res = api.list_folder(entry[:remote_path], recursive: true, get_all: true)
         case res
         when Hash
           out = process_basic_remote_props(res)
