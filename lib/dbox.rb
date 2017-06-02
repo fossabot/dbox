@@ -2,7 +2,7 @@ ROOT_PATH = File.expand_path(File.join(File.dirname(__FILE__), ".."))
 $:.unshift File.join(ROOT_PATH, "lib")
 $:.unshift File.join(ROOT_PATH, "vendor")
 
-require "dropbox_sdk"
+require "dropbox"
 require "fileutils"
 require "time"
 require "yaml"
