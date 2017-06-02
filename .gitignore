@@ -2,6 +2,7 @@ config/dropbox.json
 Gemfile.lock
 pkg
 tmp
+tags
 .DS_Store
 *~
 \#*
