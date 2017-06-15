@@ -192,10 +192,10 @@ module Dbox
       else
         # use the media API to get a URL that we can stream from, and
         # then stream the file to disk
-        res = run(path) { @client.media(path) }
-        url = res[:url] if res && res.kind_of?(Hash)
+        res = run(path) { @client.get_temporary_link(path) }
+        url = res.last if res.kind_of?(Array) && res.last.respond_to?(:=~) && res.last =~ /^https?:\/\//
         if url
-          log.info "Downloading #{path}"
+          log.info "Streaming #{path}"
           streaming_download(url, file_obj)
         else
           get_file(path, file_obj, false)
@@ -240,7 +240,7 @@ module Dbox
       http.ca_file = Dropbox::TRUSTED_CERT_FILE
 
       req = Net::HTTP::Get.new(url.request_uri)
-      req["User-Agent"] = "OfficialDropboxRubySDK/#{Dropbox::SDK_VERSION}"
+      req["User-Agent"] = "dbox"
 
       http.request(req) do |res|
         if res.kind_of?(Net::HTTPSuccess)
