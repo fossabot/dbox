@@ -139,11 +139,11 @@ module Dbox
       end
     end
 
-    def list_folder(path, recursive: false, get_all: true)
+    def list_folder(path, recursive: false, get_all: true, include_deleted: true)
       run(path) do
         log.debug "Getting file listing for #{path}"
         begin
-          res = @client.list_folder(path, recursive: recursive, get_all: get_all)
+          res = @client.list_folder(path, recursive: recursive, get_all: get_all, include_deleted: include_deleted)
         rescue Dropbox::ApiError => e
           raise Dbox::RemoteMissing, "#{path} has been deleted on Dropbox" if e.message =~ /path\/not_found/
         end

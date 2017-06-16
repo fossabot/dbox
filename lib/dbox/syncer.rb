@@ -74,13 +74,13 @@ module Dbox
         params[:blacklisted_extensions]
       end
 
-      def remove_dotfiles(contents)
-        contents.reject {|c| File.basename(c[:path]).start_with?(".") }
+      def remove_dotfiles(files)
+        files.reject {|f| File.basename(f.path_lower).start_with?(".") }
       end
 
-      def remove_blacklisted_extensions(contents)
-        return contents unless blacklisted_extensions
-        contents.reject { |c| !c[:is_dir] && blacklisted_extensions.include?(File.extname(c[:path]).downcase) }
+      def remove_blacklisted_extensions(files)
+        return files unless blacklisted_extensions
+        files.reject { |f| f.is_a?(Dropbox::FileMetadata) && blacklisted_extensions.include?(File.extname(f.path_lower))}
       end
 
       def remote_subdirs
@@ -133,39 +133,13 @@ module Dbox
 
       def gather_remote_info(entry)
         res = api.list_folder(entry[:remote_path], recursive: true, get_all: true)
-        case res
-        when Hash
-          out = process_basic_remote_props(res)
-          out[:id] = entry[:id] if entry[:id]
-          if res[:contents]
-            contents = remove_dotfiles(res[:contents])
-            contents = remove_blacklisted_extensions(contents)
-            out[:contents] = contents.map do |c|
-              o = process_basic_remote_props(c)
-              o[:parent_id] = entry[:id] if entry[:id]
-              o[:parent_path] = entry[:path]
-              o
-            end
-          end
-          out
-        when :not_modified
-          :not_modified
+        if res.is_a?(Array) && res.all? {|r| r.is_a?(Dropbox::FileMetadata) || r.is_a?(Dropbox::FolderMetadata)}
+          res = remove_dotfiles(res)
+          res = remove_blacklisted_extensions(res)
+          res
         else
           raise(RuntimeError, "Invalid result from server: #{res.inspect}")
         end
-      end
-
-      def process_basic_remote_props(res)
-        out = {}
-        out[:path]        = remote_to_relative_path(res[:path])
-        out[:local_path]  = relative_to_local_path(out[:path])
-        out[:remote_path] = relative_to_remote_path(out[:path])
-        out[:modified]    = parse_time(res[:modified])
-        out[:is_dir]      = res[:is_dir]
-        out[:remote_hash] = res[:hash] if res[:hash]
-        out[:revision]    = res[:rev] if res[:rev]
-        out[:size]        = res[:bytes] if res[:bytes]
-        out
       end
 
       def generate_tmpfilename(path)
@@ -302,46 +276,40 @@ module Dbox
 
         # grab the metadata for the current dir (either off the filesystem or from Dropbox)
         res = gather_remote_info(dir)
-        if res == :not_modified
-          # directory itself was not modified, but we still need to
-          # recur on subdirectories
-          recur_dirs += database.subdirs(dir[:id]).map {|d| [:update, d] }
-        else
-          raise(ArgumentError, "Not a directory: #{res.inspect}") unless res[:is_dir]
+        raise(ArgumentError, "Not a directory: #{res.inspect}") unless res.first.is_a?(Dropbox::FolderMetadata)
 
-          # dir may have changed -- calculate changes on contents
-          contents = res.delete(:contents)
-          if operation == :create || modified?(dir, res)
-            res[:parent_id] = dir[:parent_id] if dir[:parent_id]
-            res[:parent_path] = dir[:parent_path] if dir[:parent_path]
-            out << [operation, res]
-          end
-          found_paths = []
-          existing_entries = current_dir_entries_as_hash(dir)
+        # dir may have changed -- calculate changes on contents
+        contents = res.delete(:contents)
+        if operation == :create || modified?(dir, res)
+          res[:parent_id] = dir[:parent_id] if dir[:parent_id]
+          res[:parent_path] = dir[:parent_path] if dir[:parent_path]
+          out << [operation, res]
+        end
+        found_paths = []
+        existing_entries = current_dir_entries_as_hash(dir)
 
-          # process each entry that came back from dropbox/filesystem
-          contents.each do |c|
-            found_paths << c[:path]
-            if entry = existing_entries[c[:path]]
-              c[:id] = entry[:id]
-              c[:modified] = parse_time(c[:modified])
-              if c[:is_dir]
-                # queue dir for later
-                c[:remote_hash] = entry[:remote_hash]
-                recur_dirs << [:update, c]
-              else
-                # update iff modified
-                out << [:update, c] if modified?(entry, c)
-              end
+        # process each entry that came back from dropbox/filesystem
+        contents.each do |c|
+          found_paths << c[:path]
+          if entry = existing_entries[c[:path]]
+            c[:id] = entry[:id]
+            c[:modified] = parse_time(c[:modified])
+            if c[:is_dir]
+              # queue dir for later
+              c[:remote_hash] = entry[:remote_hash]
+              recur_dirs << [:update, c]
             else
-              # create
-              c[:modified] = parse_time(c[:modified])
-              if c[:is_dir]
-                # queue dir for later
-                recur_dirs << [:create, c]
-              else
-                out << [:create, c]
-              end
+              # update iff modified
+              out << [:update, c] if modified?(entry, c)
+            end
+          else
+            # create
+            c[:modified] = parse_time(c[:modified])
+            if c[:is_dir]
+              # queue dir for later
+              recur_dirs << [:create, c]
+            else
+              out << [:create, c]
             end
           end
 
@@ -663,7 +631,6 @@ module Dbox
         db_entry = database.find_by_path(file[:path])
         last_revision = db_entry ? db_entry[:revision] : nil
         res = api.put_file(remote_path, local_path, last_revision)
-        process_basic_remote_props(res)
       end
 
       def force_metadata_update_from_server(entry)
