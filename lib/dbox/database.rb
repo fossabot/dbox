@@ -170,7 +170,7 @@ module Dbox
           unless entry[:is_dir]
             path = relative_to_local_path(entry[:path])
             if times_equal?(File.mtime(path), entry[:modified])
-              update_entry_by_id(entry[:id], :local_hash => calculate_hash(path))
+              update_entry_by_id(entry[:id], :local_hash => content_hash_file(path))
             end
           end
         end

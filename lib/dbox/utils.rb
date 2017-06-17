@@ -90,14 +90,28 @@ module Dbox
       a && b && a.downcase == b.downcase
     end
 
-    def calculate_hash(filepath)
-      begin
-        Digest::MD5.file(filepath).to_s
-      rescue Errno::EISDIR
-        nil
-      rescue Errno::ENOENT
-        nil
+    # Calculate the content hash of the file found at path
+    def content_hash_file(path)
+      io = File.open(path)
+      content_hash(io)
+    rescue Errno::EISDIR
+      nil
+    rescue Errno::ENOENT
+      nil
+    end
+
+    # content_hash algorithm as described here: https://www.dropbox.com/developers/reference/content-hash
+    # 1. Split the file into blocks of 4 MB (4,194,304 or 4 * 1024 * 1024 bytes). The last block may be smaller than 4 MB.
+    # 2. Compute the hash of each block using SHA-256.
+    # 3. Concatenate the hash of all blocks in the binary format to form a single binary string.
+    # 4. Compute the hash of the concatenated string using SHA-256. Output the resulting hash in hexadecimal format.
+    def content_hash(io)
+      chunksize = 4 * 1024 * 1024
+      sha = ''
+      until io.eof do
+        sha << Digest::SHA256.digest(io.read(chunksize))
       end
+      Digest::SHA256.hexdigest(sha)
     end
 
     def find_nonconflicting_path(filepath)

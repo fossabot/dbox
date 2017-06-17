@@ -208,7 +208,7 @@ module Dbox
               # download the new file
               begin
                 res = create_file(c)
-                local_hash = calculate_hash(c[:local_path])
+                local_hash = content_hash_file(c[:local_path])
                 database.add_entry(c[:path], false, c[:parent_id], c[:modified], c[:revision], c[:remote_hash], local_hash)
                 changelist[:created] << c[:path]
                 if res.kind_of?(Array) && res[0] == :conflict
@@ -232,7 +232,7 @@ module Dbox
               # download updates to the file
               begin
                 res = update_file(c)
-                local_hash = calculate_hash(c[:local_path])
+                local_hash = content_hash_file(c[:local_path])
                 database.update_entry_by_path(c[:path], :modified => c[:modified], :revision => c[:revision], :remote_hash => c[:remote_hash], :local_hash => local_hash)
                 changelist[:updated] << c[:path]
                 if res.kind_of?(Array) && res[0] == :conflict
@@ -391,7 +391,7 @@ module Dbox
         # file with local modifications
         clobbering = false
         if entry = database.find_by_path(file[:path])
-          clobbering = calculate_hash(local_path) != entry[:local_hash]
+          clobbering = content_hash_file(local_path) != entry[:local_hash]
         else
           clobbering = CaseInsensitiveFile.exists?(local_path)
         end
@@ -465,7 +465,7 @@ module Dbox
             else
               # upload a new file
               begin
-                local_hash = calculate_hash(c[:local_path])
+                local_hash = content_hash_file(c[:local_path])
                 res = upload_file(c)
                 database.add_entry(c[:path], false, c[:parent_id], nil, nil, nil, local_hash)
                 if case_insensitive_equal(c[:path], res[:path])
@@ -491,7 +491,7 @@ module Dbox
             if !c[:is_dir]
               # upload changes to a file
               begin
-                local_hash = calculate_hash(c[:local_path])
+                local_hash = content_hash_file(c[:local_path])
                 res = upload_file(c)
                 database.update_entry_by_path(c[:path], :local_hash => local_hash)
                 if case_insensitive_equal(c[:path], res[:path])
@@ -555,7 +555,7 @@ module Dbox
             :modified => mtime(local_path),
             :is_dir => is_dir(local_path),
             :parent_path => dir[:path],
-            :local_hash => calculate_hash(local_path)
+            :local_hash => content_hash_file(local_path)
           }
           if entry = existing_entries[p]
             c[:id] = entry[:id]
