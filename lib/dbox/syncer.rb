@@ -145,7 +145,7 @@ module Dbox
       def generate_tmpfilename(path)
         out = CaseInsensitiveFile.join(local_path, ".#{path.gsub(/\W/, '-')}.part")
         if CaseInsensitiveFile.exists?(out)
-          generate_tmpfilename("path#{rand(1000)}")
+          generate_tmpfilename("path#{rand(1_000_000)}")
         else
           out
         end
