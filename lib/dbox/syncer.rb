@@ -95,10 +95,24 @@ module Dbox
         params[:subdir].split(/,/)
       end
 
+      def entries_hash_by_path
+        out = InsensitiveHash.new
+        database.contents.each_with_object(InsensitiveHash.new) do |entry, h|
+          h[entry[:path_lower]] = entry if entry[:path_lower]
+        end
+      end
+
+      def entries_hash_by_dropbox_id
+        database.contents.each_with_object(InsensitiveHash.new) do |entry, h|
+          h[entry[:dropbox_id]] = entry if entry[:dropbox_id]
+        end
+      end
+
       def current_dir_entries_as_hash(dir)
         if dir[:id]
           out = InsensitiveHash.new
-          database.contents(dir[:id]).each {|e| out[e[:path]] = e }
+          out[dir[:path]] = dir
+          database.contents.each {|e| out[e[:path]] = e }
           out
         else
           {}
@@ -133,7 +147,7 @@ module Dbox
 
       def gather_remote_info(entry)
         res = api.list_folder(entry[:remote_path], recursive: true, get_all: true)
-        if res.is_a?(Array) && res.all? {|r| r.is_a?(Dropbox::FileMetadata) || r.is_a?(Dropbox::FolderMetadata)}
+        if res.is_a?(Array) && res.all? {|r| r.is_a?(Dropbox::FileMetadata) || r.is_a?(Dropbox::FolderMetadata) || r.is_a?(Dropbox::DeletedMetadata)}
           res = remove_dotfiles(res)
           res = remove_blacklisted_extensions(res)
           res
@@ -269,67 +283,72 @@ module Dbox
       end
 
       def calculate_changes(dir, operation = :update)
-        raise(ArgumentError, "Not a directory: #{dir.inspect}") unless dir[:is_dir]
-
         out = []
         recur_dirs = []
 
         # grab the metadata for the current dir (either off the filesystem or from Dropbox)
-        res = gather_remote_info(dir)
-        raise(ArgumentError, "Not a directory: #{res.inspect}") unless res.first.is_a?(Dropbox::FolderMetadata)
+        contents = gather_remote_info(dir)
+        raise(ArgumentError, "Not a directory: #{contents.inspect}") unless contents.first.is_a?(Dropbox::FolderMetadata)
 
-        # dir may have changed -- calculate changes on contents
-        contents = res.delete(:contents)
-        if operation == :create || modified?(dir, res)
-          res[:parent_id] = dir[:parent_id] if dir[:parent_id]
-          res[:parent_path] = dir[:parent_path] if dir[:parent_path]
-          out << [operation, res]
-        end
         found_paths = []
-        existing_entries = current_dir_entries_as_hash(dir)
+        existing_entries_by_path = entries_hash_by_path
+        existing_entries_by_dropbox_id = entries_hash_by_dropbox_id
 
         # process each entry that came back from dropbox/filesystem
         contents.each do |c|
-          found_paths << c[:path]
-          if entry = existing_entries[c[:path]]
-            c[:id] = entry[:id]
-            c[:modified] = parse_time(c[:modified])
-            if c[:is_dir]
-              # queue dir for later
-              c[:remote_hash] = entry[:remote_hash]
-              recur_dirs << [:update, c]
-            else
+          relative_path = remote_to_relative_path(c.path_lower)
+          found_paths << relative_path
+          res = {
+            path: relative_path,
+            remote_path: c.path_lower,
+          }
+          # Dropbox::FileMetadata => file. Dropbox::FolderMetadata => folder
+          res[:type] = c.class.to_s.split(/::/).last.sub('Metadata', '').downcase
+          res[:dropbox_id] = c.id if c.respond_to?(:id)
+          res[:modified] = c.modified if c.respond_to?(:modified)
+          if entry = existing_entries_by_dropbox_id[res[:dropbox_id]] || existing_entries_by_path[relative_path]
+            case res[:type]
+            when 'folder'
+              out << [:update, res]
+            when 'file'
+              res[:remote_hash] = c.content_hash
+              res[:size] = c.size
               # update iff modified
-              out << [:update, c] if modified?(entry, c)
+              out << [:update, res] if modified?(entry, res)
+            when 'delete'
+              out << [:delete, res]
             end
           else
             # create
-            c[:modified] = parse_time(c[:modified])
-            if c[:is_dir]
-              # queue dir for later
-              recur_dirs << [:create, c]
-            else
-              out << [:create, c]
+            case res[:type]
+            when 'folder'
+              out << [:create, res]
+            when 'file'
+              res[:remote_hash] = c.content_hash
+              res[:size] = c.size
+              out << [:create, res]
+            when 'delete'
+              out << [:delete, res]
             end
           end
 
           # add any deletions
-          dirs = case_insensitive_difference(existing_entries.keys, found_paths)
-          dirs = dirs.select { |file| local_subdirs.any? { |dir| file =~ /^#{dir}/ }} if local_subdirs
-          out += dirs.map do |p|
-            [:delete, existing_entries[p]]
-          end
+          # dirs = case_insensitive_difference(existing_entries.keys, found_paths)
+          # dirs = dirs.select { |file| local_subdirs.any? { |dir| file =~ /^#{dir}/ }} if local_subdirs
+          # out += dirs.map do |p|
+          #   [:delete, existing_entries[p]]
+          # end
         end
 
         # recursively process new & existing subdirectories in parallel
-        recur_dirs.each do |operation, dir|
-          begin
-            out += calculate_changes(dir, operation)
-          rescue => e
-            log.error "Error while caclulating changes for #{operation} on #{dir[:path]}: #{e.inspect}\n#{e.backtrace.join("\n")}"
-            out += [[:failed, dir.merge({ :operation => operation, :error => e })]]
-          end
-        end
+        # recur_dirs.each do |operation, dir|
+        #   begin
+        #     out += calculate_changes(dir, operation)
+        #   rescue => e
+        #     log.error "Error while caclulating changes for #{operation} on #{dir[:path]}: #{e.inspect}\n#{e.backtrace.join("\n")}"
+        #     out += [[:failed, dir.merge({ :operation => operation, :error => e })]]
+        #   end
+        # end
 
         out
       end

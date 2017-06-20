@@ -309,7 +309,7 @@ module Dbox
     end
 
     def root_dir
-      find_entry("WHERE parent_id is NULL")
+      find_entry("WHERE path_lower = ''")
     end
 
     def find_by_path(path)
@@ -317,9 +317,8 @@ module Dbox
       find_entry("WHERE path=?", path)
     end
 
-    def contents(dir_id)
-      raise(ArgumentError, "dir_id cannot be null") unless dir_id
-      find_entries("WHERE parent_id=?", dir_id)
+    def contents
+      find_entries()
     end
 
     def subdirs(dir_id)
@@ -349,7 +348,7 @@ module Dbox
       raise(ArgumentError, "entry cannot be null") unless entry
 
       # cascade delete children, if any
-      contents(entry[:id]).each {|child| delete_entry_by_entry(child) }
+      contents.each {|child| delete_entry_by_entry(child) }
 
       # delete main entry
       delete_entry("WHERE id=?", entry[:id])
