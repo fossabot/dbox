@@ -59,17 +59,16 @@ module Dbox
           version      integer NOT NULL
         );
         CREATE TABLE IF NOT EXISTS entries (
-          id           integer PRIMARY KEY AUTOINCREMENT NOT NULL,
-          path         text COLLATE NOCASE UNIQUE NOT NULL,
-          is_dir       boolean NOT NULL,
-          parent_id    integer REFERENCES entries(id) ON DELETE CASCADE,
-          local_hash   text,
-          remote_hash  text,
-          modified     datetime,
-          revision     text
+          id             integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+          dropbox_id     text,
+          path_lower     text UNIQUE NOT NULL,
+          path_display   text UNIQUE NOT NULL,
+          type           text NOT NULL,
+          local_hash     text,
+          modified       datetime,
+          revision       text
         );
-        CREATE INDEX IF NOT EXISTS entry_parent_ids ON entries(parent_id);
-        CREATE INDEX IF NOT EXISTS entry_path ON entries(path);
+        CREATE INDEX IF NOT EXISTS entry_path ON entries(path_lower);
       })
     end
 
@@ -226,10 +225,51 @@ module Dbox
           COMMIT;
         })
       end
+
+      if metadata[:version] < 6
+        log.info 'Migrating to database schema v6'
+
+        # Changes to use the Dropbox V2 API
+        @db.execute_batch(%{
+         BEGIN TRANSACTION;
+         ALTER TABLE entries RENAME TO entries_old;
+         CREATE TABLE entries (
+           id             integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+           dropbox_id     text,
+           path_lower     text UNIQUE NOT NULL,
+           path_display   text UNIQUE NOT NULL,
+           type           text NOT NULL,
+           local_hash     text,
+           modified       datetime,
+           revision       text
+         );
+         INSERT INTO entries SELECT id, null, lower(path), path, 'file', null, modified, revision FROM entries_old;
+
+          UPDATE ENTRIES SET type="folder" where entries.id IN (select entries_old.id from entries_old where entries_old.is_dir);
+
+          -- recreate indexes
+          DROP INDEX IF EXISTS entry_parent_ids;
+          DROP INDEX IF EXISTS entry_path;
+          CREATE INDEX entry_path ON entries(path_lower);
+                          })
+
+        find_entries('WHERE type = "file"').each do |entry|
+          path = relative_to_local_path(entry[:path_lower])
+          hash = content_hash_file(path)
+          update_entry_by_id(entry[:id], local_hash: hash)
+        end
+
+        @db.execute_batch(%{
+          -- drop old table, update version and commit
+          DROP TABLE entries_old;
+          UPDATE metadata SET version = 6;
+          COMMIT;
+                          })
+      end
     end
 
     METADATA_COLS = [ :remote_path, :version ] # don't need to return id
-    ENTRY_COLS    = [ :id, :path, :is_dir, :parent_id, :local_hash, :remote_hash, :modified, :revision ]
+    ENTRY_COLS    = [ :id, :dropbox_id, :path_lower, :path_display, :type, :local_hash, :modified, :revision ]
 
     def bootstrap(remote_path)
       @db.execute(%{
@@ -346,7 +386,7 @@ module Dbox
     def find_entries_with_columns(entry_cols, conditions = "", *args)
       out = []
       @db.execute(%{
-        SELECT #{entry_cols.join(",")} FROM entries #{conditions} ORDER BY path ASC;
+        SELECT #{entry_cols.join(",")} FROM entries #{conditions} ORDER BY path_lower ASC;
       }, *args) do |res|
         out << entry_res_to_fields(entry_cols, res)
       end
