@@ -63,7 +63,6 @@ module Dbox
           dropbox_id     text,
           path_lower     text UNIQUE NOT NULL,
           path_display   text UNIQUE NOT NULL,
-          type           text NOT NULL,
           local_hash     text,
           modified       datetime,
           revision       text
@@ -238,14 +237,11 @@ module Dbox
            dropbox_id     text,
            path_lower     text UNIQUE NOT NULL,
            path_display   text UNIQUE NOT NULL,
-           type           text NOT NULL,
            local_hash     text,
            modified       datetime,
            revision       text
          );
-         INSERT INTO entries SELECT id, null, lower(path), path, 'file', null, modified, revision FROM entries_old;
-
-          UPDATE ENTRIES SET type="folder" where entries.id IN (select entries_old.id from entries_old where entries_old.is_dir);
+         INSERT INTO entries SELECT id, null, lower(path), path, null, modified, revision FROM entries_old WHERE NOT entries_old.is_dir;
 
           -- recreate indexes
           DROP INDEX IF EXISTS entry_parent_ids;
@@ -253,7 +249,7 @@ module Dbox
           CREATE INDEX entry_path ON entries(path_lower);
                           })
 
-        find_entries('WHERE type = "file"').each do |entry|
+        find_entries.each do |entry|
           path = relative_to_local_path(entry[:path_lower])
           hash = content_hash_file(path)
           update_entry_by_id(entry[:id], local_hash: hash)
@@ -269,7 +265,7 @@ module Dbox
     end
 
     METADATA_COLS = [ :remote_path, :version ] # don't need to return id
-    ENTRY_COLS    = [ :id, :dropbox_id, :path_lower, :path_display, :type, :local_hash, :modified, :revision ]
+    ENTRY_COLS    = [ :id, :dropbox_id, :path_lower, :path_display, :local_hash, :modified, :revision ]
 
     def bootstrap(remote_path)
       @db.execute(%{
@@ -314,16 +310,11 @@ module Dbox
 
     def find_by_path(path)
       raise(ArgumentError, "path cannot be null") unless path
-      find_entry("WHERE path=?", path)
+      find_entry("WHERE path_lower=?", path)
     end
 
     def contents
       find_entries()
-    end
-
-    def subdirs(dir_id)
-      raise(ArgumentError, "dir_id cannot be null") unless dir_id
-      find_entries("WHERE parent_id=? AND is_dir=1", dir_id)
     end
 
     def add_entry(path, is_dir, parent_id, modified, revision, remote_hash, local_hash)
