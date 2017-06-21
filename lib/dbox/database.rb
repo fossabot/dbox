@@ -313,17 +313,27 @@ module Dbox
       find_entry("WHERE path_lower=?", path)
     end
 
+    def find_by_dropbox_id(dropbox_id)
+      raise(ArgumentError, "dropbox_id cannot be null") unless dropbox_id
+      find_entry("WHERE dropbox_id=?", dropbox_id)
+    end
+
     def contents
       find_entries()
     end
 
-    def add_entry(path, modified, revision, remote_hash, local_hash)
-      insert_entry(:path => path, :is_dir => is_dir, :parent_id => parent_id, :modified => modified, :revision => revision, :remote_hash => remote_hash, :local_hash => local_hash)
+    def add_entry(fields)
+      insert_entry(fields)
     end
 
     def update_entry_by_id(id, fields)
       raise(ArgumentError, "id cannot be null") unless id
       update_entry(["WHERE id=?", id], fields)
+    end
+
+    def update_entry_by_dropbox_id(dropbox_id, fields)
+      raise(ArgumentError, "dropbox_id cannot be null") unless dropbox_id
+      update_entry(["WHERE dropbox_id=?", dropbox_id], fields)
     end
 
     def update_entry_by_path(path, fields)
@@ -333,6 +343,10 @@ module Dbox
 
     def delete_entry_by_path(path)
       delete_entry_by_entry(find_by_path_lower(path))
+    end
+
+    def delete_entry_by_dropbox_id(dropbox_id)
+      delete_entry_by_entry(find_by_dropbox_id(dropbox_id))
     end
 
     def delete_entry_by_entry(entry)
@@ -387,7 +401,6 @@ module Dbox
       log.debug "Inserting entry: #{fields.inspect}"
       h = fields.clone
       h[:modified]  = h[:modified].to_i if h[:modified]
-      h[:is_dir] = (h[:is_dir] ? 1 : 0) unless h[:is_dir].nil?
       @db.execute(%{
         INSERT INTO entries (#{h.keys.join(",")})
         VALUES (#{(["?"] * h.size).join(",")});
