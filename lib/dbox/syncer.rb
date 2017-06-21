@@ -176,6 +176,8 @@ module Dbox
             changelist[k].sort! {|c1, c2| c1[:original] <=> c2[:original] }
           when :failed
             changelist[k].sort! {|c1, c2| c1[:path] <=> c2[:path] }
+          when :moved
+            changelist[k].sort! {|c1, c2| c1[:path] <=> c2[:path] }
           else
             changelist[k].sort!
           end
@@ -190,129 +192,95 @@ module Dbox
       end
 
       def practice
-        dir = database.root_dir
-        changes = calculate_changes(dir)
+        @practice = true
+        changes = execute
         log.debug "Changes that would be executed:\n" + changes.map {|c| c.inspect }.join("\n")
+      ensure
+        @practice = false
       end
 
       def execute
         remove_tmpfiles
         dir = database.root_dir
-        changes = calculate_changes(dir)
-        log.debug "Executing changes:\n" + changes.map {|c| c.inspect }.join("\n")
-        changelist = { :created => [], :deleted => [], :updated => [], :failed => [] }
-        changes.each do |op, change|
-          # We want to include paths up to and including the remote_subdirs, and also paths that have the remote_subdirs as their root
-          # if remote_subdirs && !remote_subdirs.any? {|dir| change[:remote_path].index(dir) == 0 || dir.index(change[:remote_path]) == 0}
-          #   if op == :create && data[:is_dir] && !database.find_by_path(change[:path])
-          #     database.add_entry(change[:path], true, change[:parent_id], change[:modified], change[:revision], nil, nil)
-          #   end
-          #   next
-          # end
-          case op
-          when :create
-            # Create can be done on a file or a folder
-            case change[:type]
-            when 'folder'
-              create_dir(change)
-              changelist[:created] << change[:path]
-            when 'file'
-              begin
-                # download the new file
-                res = create_file(change)
-                local_hash = content_hash_file(change[:local_path])
-                # database.add_entry(change[:path], change[:modified], change[:revision], change[:remote_hash], local_hash)
-                changelist[:created] << change[:path]
-                if res.kind_of?(Array) && res[0] == :conflict
-                  changelist[:conflicts] ||= []
-                  changelist[:conflicts] << res[1]
-                end
-              rescue => e
-                log.error "Error while downloading #{change[:path]}: #{e.inspect}\n#{e.backtrace.join("\n")}"
-                changelist[:failed] << { :operation => :create, :path => change[:path], :error => e }
-              end
-            end
-          when :update
-            # update only applies to files
-            begin
-              res = update_file(change)
-              local_hash = content_hash_file(change[:local_path])
-              # database.update_entry_by_path(change[:path], :modified => change[:modified], :revision => change[:revision], :remote_hash => change[:remote_hash], :local_hash => local_hash)
-              changelist[:updated] << change[:path]
-              if res.kind_of?(Array) && res[0] == :conflict
-                changelist[:conflicts] ||= []
-                changelist[:conflicts] << res[1]
-              end
-            rescue => e
-              log.error "Error while downloading #{change[:path]}: #{e.inspect}\n#{e.backtrace.join("\n")}"
-              changelist[:failed] << { :operation => :create, :path => change[:path], :error => e }
-            end
-          when :delete
-            # delete the local directory/file
-            case change[:delete_type]
-            when 'file'
-              delete_file(change)
-              # database.delete_entry_by_path(change[:path])
-            when 'folder'
-              delete_dir(change)
-            end
-            changelist[:deleted] << change[:path]
-          else
-            raise(RuntimeError, "Unknown operation type: #{op}")
-          end
-        end
-
-        # sort & return output
-        sort_changelist(changelist)
-      end
-
-      def calculate_changes(dir, operation = :update)
-        out = []
-        recur_dirs = []
-
-        # grab the metadata for the current dir from Dropbox
-        contents = gather_remote_info
-
         found_paths = []
         existing_entries_by_path = entries_hash_by_path
         existing_entries_by_dropbox_id = entries_hash_by_dropbox_id
+        changelist = {created: [], deleted: [], updated: [], failed: [], moved: []}
+        # grab the metadata for the current dir from Dropbox
+        contents = gather_remote_info
+
+        # The first time you download via V2 of the API, you need to stick the
+        # dropbox_id in the DB.
+        # We don't do this in the migration as the DB class has no access to the
+        # API.
+        database.contents.reject { |entry| entry[:dropbox_id] }.each do |entry|
+          matching_content = contents.detect do |content|
+            content.is_a?(Dropbox::FileMetadata) && remote_to_relative_path(content.path_lower) == entry[:path_lower]
+          end
+          database.update_entry_by_id(entry[:id], dropbox_id: matching_content.id ) if matching_content
+        end
 
         # process each entry that came back from dropbox/filesystem
         contents.each do |c|
           relative_path = remote_to_relative_path(c.path_lower)
           local_path = relative_to_local_path(relative_path)
+          remote_path = c.path_lower
           found_paths << relative_path
           res = {
             path: relative_path,
-            remote_path: c.path_lower,
+            path_display: c.path_display,
+            path_lower: c.path_lower,
             local_path: local_path,
             relative_path: relative_path
           }
           # Dropbox::FileMetadata => file. Dropbox::FolderMetadata => folder
-          res[:type] = c.class.to_s.split(/::/).last.sub('Metadata', '').downcase
-          res[:dropbox_id] = c.id if c.respond_to?(:id)
-          res[:modified] = c.server_modified if c.respond_to?(:server_modified)
-          case res[:type]
+          meta_type = c.class.to_s.split(/::/).last.sub('Metadata', '').downcase
+          case meta_type
           when 'folder'
-            out << [:create, res]
+            create_dir(local_path)
           when 'file'
             res[:remote_hash] = c.content_hash
             res[:size] = c.size
-            if entry = existing_entries_by_dropbox_id[res[:dropbox_id]] || existing_entries_by_path[relative_path]
-              out << [:update, res] if modified?(entry, res)
+            res[:dropbox_id] = c.id if c.respond_to?(:id)
+            res[:modified] = c.server_modified if c.respond_to?(:server_modified)
+            create_dir(CaseInsensitiveFile.dirname(local_path))
+            if entry = existing_entries_by_dropbox_id[res[:dropbox_id]]
+              # Move if necessary
+              if entry[:path_lower] != remote_to_relative_path(c.path_lower)
+                move_file(entry[:path_lower], local_path)
+                changelist[:moved] << {entry[:path_lower] => local_path}
+              end
+
+              # Download if necessary
+              if entry[:local_hash] != c.content_hash
+                res = download_file(local_path, remote_path, res[:size])
+                changelist[:created] << local_path
+                if res.kind_of?(Array) && res[0] == :conflict
+                  changelist[:conflicts] ||= []
+                  changelist[:conflicts] << res[1]
+                end
+              end
             else
-              out << [:create, res]
+              # Create the new file
+              res = download_file(local_path, remote_path, res[:size])
+              # TODO Add the new file to the DB
+              changelist[:created] << local_path
+              if res.kind_of?(Array) && res[0] == :conflict
+                changelist[:conflicts] ||= []
+                changelist[:conflicts] << res[1]
+              end
             end
           when 'delete'
             # Dropbox doesn't tell us if we've already deleted the entry
             # or if it's a file or a folder
-            if CaseInsensitiveFile.exist?(res[:path])
-              res[:delete_type] = if CaseInsensitiveFile.directory?(res[:path])
-                                    'folder'
-                                  else
-                                    'file'
-                                  end
-              out << [:delete, res]
+            if CaseInsensitiveFile.exist?(local_path)
+              if CaseInsensitiveFile.file?(local_path)
+                delete_file(local_path)
+                # TODO remove the entry from the DB
+              else
+                delete_dir(local_path)
+              end
+              changelist[:deleted] << local_path
             end
           end
 
@@ -324,7 +292,8 @@ module Dbox
           # end
         end
 
-        out
+        # sort & return output
+        sort_changelist(changelist)
       end
 
       def modified?(entry, res)
@@ -335,59 +304,49 @@ module Dbox
         out
       end
 
-      def create_dir(dir)
-        local_path = dir[:local_path]
+      def create_dir(local_path)
         log.info "Creating #{local_path}"
-        return if CaseInsensitiveFile.exists?(local_path)
+        return :exists if CaseInsensitiveFile.exists?(local_path)
+        return if @practice
         CaseInsensitiveFile.mkdir_p(local_path)
       end
 
-      def update_dir(dir)
-        update_file_timestamp(dir)
-      end
-
-      def delete_dir(dir)
-        local_path = dir[:local_path]
+      def delete_dir(local_path)
         log.info "Deleting #{local_path}"
+        return if @practice
         CaseInsensitiveFile.rm_rf(local_path)
       end
 
-      def create_file(file)
-        saving_parent_timestamp(file) do
-          download_file(file)
-        end
-      end
-
-      def update_file(file)
-        download_file(file)
-      end
-
-      def delete_file(file)
-        local_path = file[:local_path]
+      def delete_file(local_path)
         log.info "Deleting file: #{local_path}"
-        saving_parent_timestamp(file) do
-          CaseInsensitiveFile.rm_f(local_path)
-        end
+        return if @practice
+        CaseInsensitiveFile.rm_f(local_path)
       end
 
-      def download_file(file)
-        local_path = CaseInsensitiveFile.resolve(file[:local_path])
-        remote_path = file[:remote_path]
+      def move_file(original_local_path, final_local_path)
+        return if @practice
+        CaseInsensitiveFile.mv(original_local_path, final_local_path)
+      end
+
+      def download_file(local_path, remote_path, size)
+        return if @practice
+        local_path = CaseInsensitiveFile.resolve(local_path)
+        path_lower = local_to_relative_path(local_path).downcase
 
         # check to ensure we aren't overwriting an untracked file or a
         # file with local modifications
         clobbering = false
-        if entry = database.find_by_path(file[:path])
+        if entry = database.find_by_path(path_lower)
           clobbering = content_hash_file(local_path) != entry[:local_hash]
         else
           clobbering = CaseInsensitiveFile.exists?(local_path)
         end
 
         # stream files larger than the minimum
-        stream = file[:size] && file[:size] > MIN_BYTES_TO_STREAM_DOWNLOAD
+        stream = size && size > MIN_BYTES_TO_STREAM_DOWNLOAD
 
         # download to temp file
-        tmp = generate_tmpfilename(file[:path])
+        tmp = generate_tmpfilename(path_lower)
         CaseInsensitiveFile.open(tmp, "wb") do |f|
           api.get_file(remote_path, f, stream)
         end
@@ -397,15 +356,14 @@ module Dbox
           backup_path = find_nonconflicting_path(local_path)
           CaseInsensitiveFile.mv(local_path, backup_path)
           backup_relpath = local_to_relative_path(backup_path)
-          log.warn "#{file[:path]} had a conflict and the existing copy was renamed to #{backup_relpath} locally"
+          log.warn "#{path_lower} had a conflict and the existing copy was renamed to #{backup_relpath} locally"
         end
 
-        # atomic move over to the real file, and update the timestamp
+        # atomic move over to the real file
         CaseInsensitiveFile.mv(tmp, local_path)
-        update_file_timestamp(file)
 
         if backup_relpath
-          [:conflict, { :original => file[:path], :renamed => backup_relpath }]
+          [:conflict, { :original => path_lower, :renamed => backup_relpath }]
         else
           true
         end
@@ -527,7 +485,6 @@ module Dbox
         raise(ArgumentError, "Not a directory: #{dir.inspect}") unless dir[:is_dir]
 
         out = []
-        recur_dirs = []
 
         existing_entries = current_dir_entries_as_hash(dir)
         child_paths = list_contents(dir).sort
@@ -546,12 +503,10 @@ module Dbox
           }
           if entry = existing_entries[p]
             c[:id] = entry[:id]
-            recur_dirs << c if c[:is_dir] # queue dir for later
             out << [:update, c] if modified?(entry, c) # update iff modified
           else
             # create
             out << [:create, c]
-            recur_dirs << c if c[:is_dir]
           end
         end
 
