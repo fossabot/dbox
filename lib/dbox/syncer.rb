@@ -226,49 +226,57 @@ module Dbox
           local_path = relative_to_local_path(relative_path)
           remote_path = c.path_lower
           found_paths << relative_path
-          res = {
-            path: relative_path,
-            path_display: c.path_display,
-            path_lower: c.path_lower,
-            local_path: local_path,
-            relative_path: relative_path
-          }
           # Dropbox::FileMetadata => file. Dropbox::FolderMetadata => folder
           meta_type = c.class.to_s.split(/::/).last.sub('Metadata', '').downcase
+          log.debug("Executing changes for #{c.path_lower} of type #{meta_type}")
           case meta_type
           when 'folder'
             create_dir(local_path)
           when 'file'
-            res[:remote_hash] = c.content_hash
-            res[:size] = c.size
-            res[:dropbox_id] = c.id if c.respond_to?(:id)
-            res[:modified] = c.server_modified if c.respond_to?(:server_modified)
+            updated_entry = {
+              dropbox_id: c.id,
+              path_lower: remote_to_relative_path(c.path_lower),
+              path_display: remote_to_relative_path(c.path_display),
+              local_hash: c.content_hash,
+              modified: c.server_modified,
+              revision: c.rev
+            }
             create_dir(CaseInsensitiveFile.dirname(local_path))
-            if entry = existing_entries_by_dropbox_id[res[:dropbox_id]]
+            if entry = existing_entries_by_dropbox_id[c.id]
+              changed = false
               # Move if necessary
-              if entry[:path_lower] != remote_to_relative_path(c.path_lower)
-                move_file(entry[:path_lower], local_path)
-                changelist[:moved] << {entry[:path_lower] => local_path}
+              current_local_path = relative_to_local_path(entry[:path_lower])
+              if current_local_path != local_path
+                log.debug("moving #{current_local_path} to #{local_path}")
+                move_file(current_local_path, local_path)
+                changelist[:moved] << {current_local_path => local_path}
+                changed = true
               end
 
               # Download if necessary
               if entry[:local_hash] != c.content_hash
-                res = download_file(local_path, remote_path, res[:size])
+                res = download_file(local_path, remote_path, c.size)
+                changed = true
                 changelist[:created] << local_path
                 if res.kind_of?(Array) && res[0] == :conflict
                   changelist[:conflicts] ||= []
                   changelist[:conflicts] << res[1]
                 end
               end
+
+              if changed && !@practice
+                database.update_entry_by_dropbox_id(c.id, updated_entry)
+              end
             else
               # Create the new file
-              res = download_file(local_path, remote_path, res[:size])
+              res = download_file(local_path, remote_path, c.size)
               # TODO Add the new file to the DB
               changelist[:created] << local_path
               if res.kind_of?(Array) && res[0] == :conflict
                 changelist[:conflicts] ||= []
                 changelist[:conflicts] << res[1]
               end
+              database.add_entry(updated_entry) unless @practice
             end
           when 'delete'
             # Dropbox doesn't tell us if we've already deleted the entry
@@ -279,6 +287,7 @@ module Dbox
                 # TODO remove the entry from the DB
               else
                 delete_dir(local_path)
+                database.delete_entry_by_dropbox_id(c.id) unless @practice
               end
               changelist[:deleted] << local_path
             end
