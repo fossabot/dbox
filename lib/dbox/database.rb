@@ -317,7 +317,7 @@ module Dbox
       find_entries()
     end
 
-    def add_entry(path, is_dir, parent_id, modified, revision, remote_hash, local_hash)
+    def add_entry(path, modified, revision, remote_hash, local_hash)
       insert_entry(:path => path, :is_dir => is_dir, :parent_id => parent_id, :modified => modified, :revision => revision, :remote_hash => remote_hash, :local_hash => local_hash)
     end
 
@@ -328,11 +328,11 @@ module Dbox
 
     def update_entry_by_path(path, fields)
       raise(ArgumentError, "path cannot be null") unless path
-      update_entry(["WHERE path=?", path], fields)
+      update_entry(["WHERE path_lower=?", path], fields)
     end
 
     def delete_entry_by_path(path)
-      delete_entry_by_entry(find_by_path(path))
+      delete_entry_by_entry(find_by_path_lower(path))
     end
 
     def delete_entry_by_entry(entry)
