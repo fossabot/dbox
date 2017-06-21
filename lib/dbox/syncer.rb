@@ -200,7 +200,6 @@ module Dbox
         dir = database.root_dir
         changes = calculate_changes(dir)
         log.debug "Executing changes:\n" + changes.map {|c| c.inspect }.join("\n")
-        parent_ids_of_failed_entries = []
         changelist = { :created => [], :deleted => [], :updated => [], :failed => [] }
         changes.each do |op, change|
           # We want to include paths up to and including the remote_subdirs, and also paths that have the remote_subdirs as their root
@@ -222,7 +221,7 @@ module Dbox
                 # download the new file
                 res = create_file(change)
                 local_hash = content_hash_file(change[:local_path])
-                # database.add_entry(change[:path], false, change[:parent_id], change[:modified], change[:revision], change[:remote_hash], local_hash)
+                # database.add_entry(change[:path], change[:modified], change[:revision], change[:remote_hash], local_hash)
                 changelist[:created] << change[:path]
                 if res.kind_of?(Array) && res[0] == :conflict
                   changelist[:conflicts] ||= []
@@ -230,7 +229,6 @@ module Dbox
                 end
               rescue => e
                 log.error "Error while downloading #{change[:path]}: #{e.inspect}\n#{e.backtrace.join("\n")}"
-                parent_ids_of_failed_entries << change[:parent_id]
                 changelist[:failed] << { :operation => :create, :path => change[:path], :error => e }
               end
             end
@@ -247,7 +245,6 @@ module Dbox
               end
             rescue => e
               log.error "Error while downloading #{change[:path]}: #{e.inspect}\n#{e.backtrace.join("\n")}"
-              parent_ids_of_failed_entries << change[:parent_id]
               changelist[:failed] << { :operation => :create, :path => change[:path], :error => e }
             end
           when :delete
@@ -263,12 +260,6 @@ module Dbox
           else
             raise(RuntimeError, "Unknown operation type: #{op}")
           end
-        end
-
-        # clear hashes on any dirs with children that failed so that
-        # they are processed again on next pull
-        parent_ids_of_failed_entries.uniq.each do |id|
-          database.update_entry_by_id(id, :remote_hash => nil)
         end
 
         # sort & return output
@@ -348,10 +339,7 @@ module Dbox
         local_path = dir[:local_path]
         log.info "Creating #{local_path}"
         return if CaseInsensitiveFile.exists?(local_path)
-        saving_parent_timestamp(dir) do
-          CaseInsensitiveFile.mkdir_p(local_path)
-          update_file_timestamp(dir)
-        end
+        CaseInsensitiveFile.mkdir_p(local_path)
       end
 
       def update_dir(dir)
@@ -361,9 +349,7 @@ module Dbox
       def delete_dir(dir)
         local_path = dir[:local_path]
         log.info "Deleting #{local_path}"
-        saving_parent_timestamp(dir) do
-          CaseInsensitiveFile.rm_rf(local_path)
-        end
+        CaseInsensitiveFile.rm_rf(local_path)
       end
 
       def create_file(file)
