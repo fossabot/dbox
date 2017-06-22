@@ -52,6 +52,14 @@ module Dbox
         @params = params
       end
 
+      def practice
+        @practice = true
+        changes = execute
+        log.debug "Changes that would be executed:\n" + changes.map {|c| c.inspect }.join("\n")
+      ensure
+        @practice = false
+      end
+
       def params
         @params
       end
@@ -62,6 +70,11 @@ module Dbox
 
       def metadata
         @_metadata ||= database.metadata
+      end
+
+      # path should be a relative path
+      def in_subdir?(path)
+        local_subdirs.any? { |dir| path =~ /^#{dir}/ }
       end
 
       def local_path
@@ -191,14 +204,6 @@ module Dbox
         super(database, api, params)
       end
 
-      def practice
-        @practice = true
-        changes = execute
-        log.debug "Changes that would be executed:\n" + changes.map {|c| c.inspect }.join("\n")
-      ensure
-        @practice = false
-      end
-
       def execute
         remove_tmpfiles
         dir = database.local_path
@@ -221,7 +226,7 @@ module Dbox
         end
 
         # Filter to the selected subdirs if the subdir param was used
-        contents = contents.select {|c| is_in_subdir?(remote_to_relative_path(c.path_lower))} if local_subdirs
+        contents = contents.select {|c| in_subdir?(remote_to_relative_path(c.path_lower))} if local_subdirs
 
         # process each entry that came back from dropbox/filesystem
         contents.each do |c|
@@ -298,7 +303,7 @@ module Dbox
         dirs += case_insensitive_difference(local_dirs, found_paths)
 
         dirs.uniq!
-        dirs = dirs.select { |file| is_in_subdir?(file)} if local_subdirs
+        dirs = dirs.select { |file| in_subdir?(file)} if local_subdirs
         log.debug("Deleting these dirs:")
         log.debug(dirs)
         dirs.each do |p|
@@ -307,11 +312,6 @@ module Dbox
 
         # sort & return output
         sort_changelist(changelist)
-      end
-
-      # path should be a relative path
-      def is_in_subdir?(path)
-        local_subdirs.any? { |dir| path =~ /^#{dir}/ }
       end
 
       def delete_file_or_folder_and_db_entry(path_lower, changelist)
@@ -387,14 +387,8 @@ module Dbox
         super(database, api, params)
       end
 
-      def practice
-        dir = database.root_dir
-        changes = calculate_changes(dir)
-        log.debug "Changes that would be executed:\n" + changes.map {|c| c.inspect }.join("\n")
-      end
-
       def execute
-        dir = database.root_dir
+        dir = database.local_path
         changes = calculate_changes(dir)
         log.debug "Executing changes:\n" + changes.map {|c| c.inspect }.join("\n")
         changelist = { :created => [], :deleted => [], :updated => [], :failed => [] }
