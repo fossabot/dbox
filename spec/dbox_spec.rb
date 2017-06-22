@@ -84,6 +84,15 @@ describe Dbox do
       expect("#{@local}/hello.txt").to exist
     end
 
+    it 'should delete a locally created file that is not on Dropbox' do
+      Dbox.create(@remote, @local)
+      make_file "#{@alternate}/hello.txt"
+      expect(Dbox.pull(@local)).to eql(created: [], deleted: [], updated: [], failed: [], moved: [])
+      expect("#{@local}/hello.txt").to_not exist
+    end
+
+    it 'should overwrite local changes to a file'
+
     it 'should be able to pull after deleting a file and not have the file re-created' do
       Dbox.create(@remote, @local)
       make_file "#{@local}/hello.txt"
