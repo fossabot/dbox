@@ -155,8 +155,8 @@ module Dbox
         log.info "Creating #{path}"
         begin
           @client.create_folder(path)
-        rescue DropboxError => e
-          if e.http_response.kind_of?(Net::HTTPForbidden)
+        rescue Dropbox::ApiError => e
+          if e.message =~ /conflict/
             raise RemoteAlreadyExists, "Either the directory at #{path} already exists, or it has invalid characters in the name"
           else
             raise e
