@@ -253,7 +253,8 @@ module Dbox
               end
 
               # Download if necessary
-              if entry[:local_hash] != c.content_hash
+              content_hash = content_hash_file(local_path)
+              if content_hash != c.content_hash
                 log.debug("Updating #{local_path}")
                 res = download_file(local_path, remote_path, c.size)
                 changed = true
