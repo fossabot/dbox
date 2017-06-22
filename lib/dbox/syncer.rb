@@ -172,8 +172,6 @@ module Dbox
       def sort_changelist(changelist)
         changelist.keys.each do |k|
           case k
-          when :conflicts
-            changelist[k].sort! {|c1, c2| c1[:original] <=> c2[:original] }
           when :failed
             changelist[k].sort! {|c1, c2| c1[:path] <=> c2[:path] }
           when :moved
@@ -260,10 +258,6 @@ module Dbox
                 res = download_file(local_path, remote_path, c.size)
                 changed = true
                 changelist[:updated] << local_path
-                if res.kind_of?(Array) && res[0] == :conflict
-                  changelist[:conflicts] ||= []
-                  changelist[:conflicts] << res[1]
-                end
               end
 
               if changed && !@practice
@@ -275,10 +269,6 @@ module Dbox
               # TODO Add the new file to the DB
               changelist[:created] << local_path
               log.debug("Creating #{local_path}")
-              if res.kind_of?(Array) && res[0] == :conflict
-                changelist[:conflicts] ||= []
-                changelist[:conflicts] << res[1]
-              end
               database.add_entry(updated_entry) unless @practice
             end
           when 'delete'
@@ -353,15 +343,6 @@ module Dbox
         local_path = CaseInsensitiveFile.resolve(local_path)
         path_lower = local_to_relative_path(local_path).downcase
 
-        # check to ensure we aren't overwriting an untracked file or a
-        # file with local modifications
-        clobbering = false
-        if entry = database.find_by_path(path_lower)
-          clobbering = content_hash_file(local_path) != entry[:local_hash]
-        else
-          clobbering = CaseInsensitiveFile.exists?(local_path)
-        end
-
         # stream files larger than the minimum
         stream = size && size > MIN_BYTES_TO_STREAM_DOWNLOAD
 
@@ -371,22 +352,10 @@ module Dbox
           api.get_file(remote_path, f, stream)
         end
 
-        # rename old file if clobbering
-        if clobbering && CaseInsensitiveFile.exists?(local_path)
-          backup_path = find_nonconflicting_path(local_path)
-          CaseInsensitiveFile.mv(local_path, backup_path)
-          backup_relpath = local_to_relative_path(backup_path)
-          log.warn "#{path_lower} had a conflict and the existing copy was renamed to #{backup_relpath} locally"
-        end
-
         # atomic move over to the real file
         CaseInsensitiveFile.mv(tmp, local_path)
 
-        if backup_relpath
-          [:conflict, { :original => path_lower, :renamed => backup_relpath }]
-        else
-          true
-        end
+        true
       end
 
     end
