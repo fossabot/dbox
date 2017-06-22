@@ -226,7 +226,9 @@ module Dbox
         # process each entry that came back from dropbox/filesystem
         contents.each do |c|
           relative_path = remote_to_relative_path(c.path_lower)
+          relative_path_display = remote_to_relative_path(c.path_display)
           local_path = relative_to_local_path(relative_path)
+          local_path_display = relative_to_local_path(relative_path_display)
           remote_path = c.path_lower
           # Dropbox::FileMetadata => file. Dropbox::FolderMetadata => folder
           meta_type = c.class.to_s.split(/::/).last.sub('Metadata', '').downcase
@@ -234,7 +236,7 @@ module Dbox
           case meta_type
           when 'folder'
             found_paths << relative_path
-            create_dir(local_path)
+            create_dir(local_path_display)
           when 'file'
             updated_entry = {
               dropbox_id: c.id,
@@ -244,24 +246,24 @@ module Dbox
               modified: c.server_modified,
               revision: c.rev
             }
-            create_dir(CaseInsensitiveFile.dirname(local_path))
+            create_dir(CaseInsensitiveFile.dirname(local_path_display))
             found_paths << relative_path
             if entry = existing_entries_by_dropbox_id[c.id]
               changed = false
               # Move if necessary
               current_local_path = relative_to_local_path(entry[:path_lower])
               if current_local_path != local_path && CaseInsensitiveFile.exist?(current_local_path)
-                log.debug("moving #{current_local_path} to #{local_path}")
-                move_file(current_local_path, local_path)
-                changelist[:moved] << {current_local_path => local_path}
+                log.debug("moving #{current_local_path} to #{local_path_display}")
+                move_file(current_local_path, local_path_display)
+                changelist[:moved] << {current_local_path => local_path_display}
                 changed = true
               end
 
               # Download if necessary
               content_hash = content_hash_file(local_path)
               if content_hash != c.content_hash
-                log.debug("Updating #{local_path}")
-                res = download_file(local_path, remote_path, c.size)
+                log.debug("Updating #{local_path_display}")
+                res = download_file(local_path_display, remote_path, c.size)
                 changed = true
                 changelist[:updated] << local_path
               end
@@ -271,10 +273,10 @@ module Dbox
               end
             else
               # Create the new file
-              res = download_file(local_path, remote_path, c.size)
+              res = download_file(local_path_display, remote_path, c.size)
               # TODO Add the new file to the DB
-              changelist[:created] << local_path
-              log.debug("Creating #{local_path}")
+              changelist[:created] << local_path_display
+              log.debug("Creating #{local_path_display}")
               database.add_entry(updated_entry) unless @practice
             end
           when 'delete'
