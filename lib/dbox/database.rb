@@ -342,7 +342,13 @@ module Dbox
     end
 
     def delete_entry_by_path(path)
-      delete_entry_by_entry(find_by_path_lower(path))
+      delete_entry_by_entry(find_by_path(path))
+    end
+
+    def idempotent_delete_entry_by_path(path)
+      entry = find_by_path(path)
+      return unless entry
+      delete_entry_by_entry(entry)
     end
 
     def delete_entry_by_dropbox_id(dropbox_id)
@@ -351,11 +357,6 @@ module Dbox
 
     def delete_entry_by_entry(entry)
       raise(ArgumentError, "entry cannot be null") unless entry
-
-      # cascade delete children, if any
-      contents.each {|child| delete_entry_by_entry(child) }
-
-      # delete main entry
       delete_entry("WHERE id=?", entry[:id])
     end
 
