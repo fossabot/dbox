@@ -270,10 +270,7 @@ module Dbox
     def bootstrap(remote_path)
       @db.execute(%{
         INSERT INTO metadata (remote_path, version) VALUES (?, ?);
-      }, remote_path, 5)
-      @db.execute(%{
-        INSERT INTO entries (path, is_dir) VALUES (?, ?)
-      }, "", 1)
+      }, remote_path, 6)
     end
 
     def bootstrapped?
