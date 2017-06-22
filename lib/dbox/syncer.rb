@@ -221,6 +221,8 @@ module Dbox
         end
 
         # process each entry that came back from dropbox/filesystem
+
+        contents = contents.select {|c| is_in_subdir?(remote_to_relative_path(c.path_lower))} if local_subdirs
         contents.each do |c|
           relative_path = remote_to_relative_path(c.path_lower)
           local_path = relative_to_local_path(relative_path)
@@ -293,7 +295,7 @@ module Dbox
         dirs += case_insensitive_difference(local_dirs, found_paths)
 
         dirs.uniq!
-        dirs = dirs.select { |file| local_subdirs.any? { |dir| file =~ /^#{dir}/ }} if local_subdirs
+        dirs = dirs.select { |file| is_in_subdir?(file)} if local_subdirs
         log.debug("Deleting these dirs:")
         log.debug(dirs)
         dirs.each do |p|
@@ -302,6 +304,11 @@ module Dbox
 
         # sort & return output
         sort_changelist(changelist)
+      end
+
+      # path should be a relative path
+      def is_in_subdir?(path)
+        local_subdirs.any? { |dir| path =~ /^#{dir}/ }
       end
 
       def delete_file_or_folder_and_db_entry(path_lower, changelist)
