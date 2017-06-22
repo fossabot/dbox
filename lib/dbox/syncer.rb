@@ -1,4 +1,6 @@
 require 'case_insensitive_utils'
+require 'find'
+
 module Dbox
   class Syncer
     include CaseInsensitiveFile
@@ -199,7 +201,7 @@ module Dbox
 
       def execute
         remove_tmpfiles
-        dir = database.root_dir
+        dir = database.local_path
         found_paths = []
         existing_entries_by_path = entries_hash_by_path
         existing_entries_by_dropbox_id = entries_hash_by_dropbox_id
@@ -282,10 +284,19 @@ module Dbox
 
           # Files in the DB that are not on Dropbox
         dirs = case_insensitive_difference(existing_entries_by_path.keys, found_paths)
+        # Files in the local filesystem that are not on Dropbox
+        local_dirs = []
+        Find.find(dir) do |path|
+          Find.prune if File.basename(path)[0] == ?.
+          local_dirs << local_to_relative_path(path)
+        end
+        dirs += case_insensitive_difference(local_dirs, found_paths)
+
+        dirs.uniq!
         dirs = dirs.select { |file| local_subdirs.any? { |dir| file =~ /^#{dir}/ }} if local_subdirs
         log.debug("Deleting these dirs:")
         log.debug(dirs)
-        dirs.uniq.each do |p|
+        dirs.each do |p|
           delete_file_or_folder_and_db_entry(p, changelist)
         end
 
