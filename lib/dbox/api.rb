@@ -139,7 +139,7 @@ module Dbox
       end
     end
 
-    def list_folder(path, recursive: false, get_all: true, include_deleted: true)
+    def list_folder(path, recursive: false, get_all: true, include_deleted: false)
       run(path) do
         log.debug "Getting file listing for #{path}"
         begin

@@ -162,7 +162,7 @@ module Dbox
 
       def gather_remote_info
         res = api.list_folder(database.metadata[:remote_path], recursive: true, get_all: true)
-        if res.is_a?(Array) && res.all? {|r| r.is_a?(Dropbox::FileMetadata) || r.is_a?(Dropbox::FolderMetadata) || r.is_a?(Dropbox::DeletedMetadata)}
+        if res.is_a?(Array) && res.all? {|r| r.is_a?(Dropbox::FileMetadata) || r.is_a?(Dropbox::FolderMetadata)}
           res = remove_dotfiles(res)
           res = remove_blacklisted_extensions(res)
           res
@@ -284,10 +284,6 @@ module Dbox
               log.debug("Creating #{local_path_display}")
               database.add_entry(updated_entry) unless @practice
             end
-          when 'delete'
-            # Dropbox doesn't tell us if we've already deleted the entry
-            # or if it's a file or a folder
-            delete_file_or_folder_and_db_entry(c.path_lower, changelist)
           end
 
         end
