@@ -63,6 +63,10 @@ module CaseInsensitiveFile
     File.directory?(resolve(path))
   end
 
+  def self.file?(path)
+    File.file?(resolve(path))
+  end
+
   def self.read(path)
     File.read(resolve(path))
   end
