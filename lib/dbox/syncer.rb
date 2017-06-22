@@ -220,9 +220,10 @@ module Dbox
           database.update_entry_by_id(entry[:id], dropbox_id: matching_content.id ) if matching_content
         end
 
-        # process each entry that came back from dropbox/filesystem
-
+        # Filter to the selected subdirs if the subdir param was used
         contents = contents.select {|c| is_in_subdir?(remote_to_relative_path(c.path_lower))} if local_subdirs
+
+        # process each entry that came back from dropbox/filesystem
         contents.each do |c|
           relative_path = remote_to_relative_path(c.path_lower)
           local_path = relative_to_local_path(relative_path)
