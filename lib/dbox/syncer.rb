@@ -225,12 +225,12 @@ module Dbox
           relative_path = remote_to_relative_path(c.path_lower)
           local_path = relative_to_local_path(relative_path)
           remote_path = c.path_lower
-          found_paths << relative_path
           # Dropbox::FileMetadata => file. Dropbox::FolderMetadata => folder
           meta_type = c.class.to_s.split(/::/).last.sub('Metadata', '').downcase
           log.debug("Executing changes for #{c.path_lower} of type #{meta_type}")
           case meta_type
           when 'folder'
+            found_paths << relative_path
             create_dir(local_path)
           when 'file'
             updated_entry = {
@@ -242,11 +242,12 @@ module Dbox
               revision: c.rev
             }
             create_dir(CaseInsensitiveFile.dirname(local_path))
+            found_paths << relative_path
             if entry = existing_entries_by_dropbox_id[c.id]
               changed = false
               # Move if necessary
               current_local_path = relative_to_local_path(entry[:path_lower])
-              if current_local_path != local_path
+              if current_local_path != local_path && CaseInsensitiveFile.exist?(current_local_path)
                 log.debug("moving #{current_local_path} to #{local_path}")
                 move_file(current_local_path, local_path)
                 changelist[:moved] << {current_local_path => local_path}
@@ -255,9 +256,10 @@ module Dbox
 
               # Download if necessary
               if entry[:local_hash] != c.content_hash
+                log.debug("Updating #{local_path}")
                 res = download_file(local_path, remote_path, c.size)
                 changed = true
-                changelist[:created] << local_path
+                changelist[:updated] << local_path
                 if res.kind_of?(Array) && res[0] == :conflict
                   changelist[:conflicts] ||= []
                   changelist[:conflicts] << res[1]
@@ -272,6 +274,7 @@ module Dbox
               res = download_file(local_path, remote_path, c.size)
               # TODO Add the new file to the DB
               changelist[:created] << local_path
+              log.debug("Creating #{local_path}")
               if res.kind_of?(Array) && res[0] == :conflict
                 changelist[:conflicts] ||= []
                 changelist[:conflicts] << res[1]
@@ -281,28 +284,36 @@ module Dbox
           when 'delete'
             # Dropbox doesn't tell us if we've already deleted the entry
             # or if it's a file or a folder
-            if CaseInsensitiveFile.exist?(local_path)
-              if CaseInsensitiveFile.file?(local_path)
-                delete_file(local_path)
-                # TODO remove the entry from the DB
-              else
-                delete_dir(local_path)
-                database.delete_entry_by_dropbox_id(c.id) unless @practice
-              end
-              changelist[:deleted] << local_path
-            end
+            delete_file_or_folder_and_db_entry(c.path_lower, changelist)
           end
 
-          # add any deletions
-          # dirs = case_insensitive_difference(existing_entries.keys, found_paths)
-          # dirs = dirs.select { |file| local_subdirs.any? { |dir| file =~ /^#{dir}/ }} if local_subdirs
-          # out += dirs.map do |p|
-          #   [:delete, existing_entries[p]]
-          # end
+        end
+
+          # Files in the DB that are not on Dropbox
+        dirs = case_insensitive_difference(existing_entries_by_path.keys, found_paths)
+        dirs = dirs.select { |file| local_subdirs.any? { |dir| file =~ /^#{dir}/ }} if local_subdirs
+        log.debug("Deleting these dirs:")
+        log.debug(dirs)
+        dirs.uniq.each do |p|
+          delete_file_or_folder_and_db_entry(p, changelist)
         end
 
         # sort & return output
         sort_changelist(changelist)
+      end
+
+      def delete_file_or_folder_and_db_entry(path_lower, changelist)
+        local_path = relative_to_local_path(path_lower)
+        if CaseInsensitiveFile.exist?(local_path)
+          if CaseInsensitiveFile.file?(local_path)
+            delete_file(local_path)
+            # TODO remove the entry from the DB
+          else
+            delete_dir(local_path)
+          end
+          database.idempotent_delete_entry_by_path(path_lower) unless @practice
+          changelist[:deleted] << local_path
+        end
       end
 
       def modified?(entry, res)
