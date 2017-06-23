@@ -7,6 +7,7 @@ module Dbox
   class RemoteMissing < RuntimeError; end
   class RemoteAlreadyExists < RuntimeError; end
   class RequestDenied < RuntimeError; end
+  class InvalidResponse < RuntimeError; end
 
   class API
     include Loggable
@@ -71,33 +72,6 @@ module Dbox
       begin
         res = proc.call
         handle_response(path, res) { raise RuntimeError, "Unexpected result: #{res.inspect}" }
-      # rescue DropboxNotModified => e
-      #   :not_modified
-      # rescue DropboxAuthError => e
-      #   raise e
-      # rescue DropboxError => e
-      #   if tries > 0
-      #     if e.http_response.kind_of?(Net::HTTPServiceUnavailable)
-      #       log.info "Encountered 503 on #{path} (likely rate limiting). Sleeping #{TIME_BETWEEN_TRIES}s and trying again."
-      #       # TODO check for "Retry-After" header and use that for sleep instead of TIME_BETWEEN_TRIES
-      #       log.info "Headers: #{e.http_response.to_hash.inspect}"
-      #     else
-      #       log.info "Encountered a dropbox error. Sleeping #{TIME_BETWEEN_TRIES}s and trying again. Error: #{e.inspect}"
-      #       log.info "Headers: #{e.http_response.to_hash.inspect}"
-      #     end
-      #     sleep TIME_BETWEEN_TRIES
-      #     run(path, tries - 1, &proc)
-      #   else
-      #     handle_response(path, e.http_response) { raise ServerError, "Server error -- might be a hiccup, please try your request again (#{e.message})" }
-      #   end
-      # rescue => e
-      #   if tries > 0
-      #     log.info "Encounted an unknown error. Sleeping #{TIME_BETWEEN_TRIES}s and trying again. Error: #{e.inspect}"
-      #     sleep TIME_BETWEEN_TRIES
-      #     run(path, tries - 1, &proc)
-      #   else
-      #     raise e
-      #   end
       end
     end
 
@@ -187,7 +161,7 @@ module Dbox
           file_obj << res.last.to_s
           true
         else
-          raise DropboxError.new("Invalid response #{res.inspect}")
+          raise Dbox::InvalidResponse
         end
       else
         # use the media API to get a URL that we can stream from, and
@@ -220,15 +194,18 @@ module Dbox
     def move(old_path, new_path)
       run(old_path) do
         log.info "Moving #{old_path} to #{new_path}"
-        # begin
+        begin
           @client.move(old_path, new_path)
-        # rescue DropboxError => e
-        #   if e.http_response.kind_of?(Net::HTTPForbidden)
-        #     raise RemoteAlreadyExists, "Error during move -- there may already be a Dropbox folder at #{new_path}"
-        #   else
-        #     raise e
-        #   end
-        # end
+        rescue Dropbox::ApiError => e
+          case e.message
+          when /conflict/
+            raise RemoteAlreadyExists, "Error during move -- there may already be a Dropbox folder at #{new_path}"
+          when /not_found/
+            raise RemoteMissing, "Error during move -- the dropbox folder or file you are trying to move does not exist"
+          else
+            raise e
+          end
+        end
       end
     end
 
