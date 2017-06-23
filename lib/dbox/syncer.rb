@@ -87,7 +87,7 @@ module Dbox
 
       def blacklisted_extensions
         return unless params[:blacklisted_extensions]
-        params[:blacklisted_extensions].map(&:downcase)
+        params[:blacklisted_extensions].split(/,/).map(&:downcase)
       end
 
       def remove_dotfiles(files)
@@ -114,13 +114,18 @@ module Dbox
       def entries_hash_by_path
         out = InsensitiveHash.new
         database.contents.each_with_object(InsensitiveHash.new) do |entry, h|
-          h[entry[:path_lower]] = entry if entry[:path_lower]
+          next unless entry[:path_lower]
+          next if blacklisted_extensions && blacklisted_extensions.include?(File.extname(entry[:path_lower]))
+          h[entry[:path_lower]] = entry
         end
+
       end
 
       def entries_hash_by_dropbox_id
         database.contents.each_with_object(InsensitiveHash.new) do |entry, h|
-          h[entry[:dropbox_id]] = entry if entry[:dropbox_id]
+          next unless entry[:dropbox_id]
+          next if blacklisted_extensions && blacklisted_extensions.include?(File.extname(entry[:path_lower]))
+          h[entry[:dropbox_id]] = entry
         end
       end
 
@@ -298,6 +303,7 @@ module Dbox
 
         dirs.uniq!
         dirs = dirs.select { |file| in_subdir?(file)} if local_subdirs
+        dirs = dirs.reject { |file| blacklisted_extensions.include? File.extname(file) } if blacklisted_extensions
         log.debug("Deleting these dirs:")
         log.debug(dirs)
         dirs.each do |p|
@@ -389,6 +395,7 @@ module Dbox
         # Entries on the file system. Relative paths
         existing_paths = list_contents(dir).sort.map(&:downcase)
         existing_paths = existing_paths.select { |file| in_subdir?(file)} if local_subdirs
+        existing_paths = existing_paths.reject { |file| blacklisted_extensions.include? File.extname(file) } if blacklisted_extensions
 
         # Entries on Dropbox
         remote_contents = gather_remote_info

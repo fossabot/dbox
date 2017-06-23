@@ -43,12 +43,14 @@ EOS
 
   desc 'pull [<local_path>]', 'Pull changes from Dropbox'
   option :subdir
+  option :blacklisted_extensions
   def pull(local_path = '.')
     Dbox.pull(local_path, options)
   end
 
   desc 'push [<local_path>]', 'Push changes to Dropbox'
   option :subdir
+  option :blacklisted_extensions
   def push(local_path = '.')
     Dbox.push(local_path, options)
   end
