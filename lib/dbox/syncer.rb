@@ -86,7 +86,8 @@ module Dbox
       end
 
       def blacklisted_extensions
-        params[:blacklisted_extensions]
+        return unless params[:blacklisted_extensions]
+        params[:blacklisted_extensions].map(&:downcase)
       end
 
       def remove_dotfiles(files)
@@ -386,9 +387,12 @@ module Dbox
 
         # Entries on the file system. Relative paths
         existing_paths = list_contents(dir).sort.map(&:downcase)
+        existing_paths = existing_paths.select { |file| in_subdir?(file)} if local_subdirs
 
         # Entries on Dropbox
         remote_contents = gather_remote_info
+        # Filter to the selected subdirs if the subdir param was used
+        remote_contents = remote_contents.select {|c| in_subdir?(remote_to_relative_path(c.path_lower))} if local_subdirs
 
         # Blow away the entries DB
         database.delete_all_entries
