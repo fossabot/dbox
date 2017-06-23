@@ -55,12 +55,6 @@ EOS
     Dbox.push(local_path, options)
   end
 
-  desc 'sync [<local_path>]', 'Sync changes to Dropbox'
-  option :subdir
-  def sync(local_path = '.')
-    Dbox.sync(local_path, options)
-  end
-
   desc 'move <new_remote_path> [<local_path>]', 'Move the remote Dropbox folder to a new location'
   def move(new_remote_path, local_path = '.')
     Dbox.move(new_remote_path, local_path)

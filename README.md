@@ -10,7 +10,7 @@ $ cd /tmp
 $ dbox clone Public
 $ cd Public
 $ echo "Hello World" > hello.txt
-$ dbox sync
+$ dbox push
 [INFO] Uploading /Public/hello.txt
 ```
 
@@ -51,7 +51,7 @@ $ dbox authorize
 1. Go to: https://www.dropbox.com/1/oauth2/authorize?client_id=1x7xvn1pvas3a3&response_type=code
 2. Click "Allow" (you might have to log in first)
 3. Copy the authorization code
-Enter the authorization code here: 
+Enter the authorization code here:
 ```
 
 * Visit the given URL in your browser, and then go back to the terminal and enter the code that Dropbox provides.
@@ -105,12 +105,6 @@ $ dbox pull [<local_path>]
 
 ```sh
 $ dbox push [<local_path>]
-```
-
-#### Sync (pull changes from Dropbox, then push changes to Dropbox)
-
-```sh
-$ dbox sync [<local_path>]
 ```
 
 #### Move (move/rename the Dropbox folder)
@@ -173,8 +167,6 @@ If any conflicts occur where file contents would be lost, the conflicting file i
 { :created => [], :updated => [], :deleted => [], :conflicts => [{ :original => "foo.txt", :renamed => "foo (1).txt" }], :failed => [] }
 ```
 
-The sync API returns a hash with two entries: ```:push``` and ```:pull```, which contain the change hashes for the two operations.
-
 ### Usage
 
 #### Setup
@@ -207,12 +199,6 @@ Dbox.pull(local_path)
 
 ```ruby
 Dbox.push(local_path)
-```
-
-#### Sync (pull changes from Dropbox, then push changes to Dropbox)
-
-```ruby
-Dbox.sync(local_path)
 ```
 
 #### Move (move/rename the Dropbox folder)

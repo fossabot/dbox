@@ -61,14 +61,6 @@ module Dbox
     Dbox::Syncer.push(local_path, params)
   end
 
-  def self.sync(local_path, params = {})
-    log.debug "Syncing (local: #{local_path})"
-    res = {}
-    res[:pull] = pull(local_path, params)
-    res[:push] = push(local_path, params)
-    res
-  end
-
   def self.move(new_remote_path, local_path)
     log.debug "Moving (new remote: #{new_remote_path}, local: #{local_path})"
     new_remote_path = clean_remote_path(new_remote_path)
