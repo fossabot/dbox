@@ -316,7 +316,7 @@ module Dbox
             delete_dir(local_path)
           end
           database.idempotent_delete_entry_by_path(path_lower) unless @practice
-          changelist[:deleted] << local_path
+          changelist[:deleted] << local_to_relative_path(local_path)
         end
       end
 
@@ -415,7 +415,7 @@ module Dbox
           else
             content_hash = content_hash_file(local_path)
             dropbox_entry = remote_contents.detect do |c|
-              c.is_a?(Dropbox::FileMetadata) && c.path_lower == relative_to_remote_path(p)
+              c.is_a?(Dropbox::FileMetadata) && c.path_lower == relative_to_remote_path(p).downcase
             end
 
             if dropbox_entry.nil? || content_hash != dropbox_entry.content_hash
@@ -454,7 +454,7 @@ module Dbox
             else
               api.delete_file(c.path_lower)
             end
-            changelist[:deleted] << c.path_lower
+            changelist[:deleted] << remote_to_relative_path(c.path_lower)
           rescue Dbox::RemoteMissing
             # safe to delete even if remote is already gone
           end
