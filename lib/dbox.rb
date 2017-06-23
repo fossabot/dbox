@@ -95,9 +95,9 @@ module Dbox
   end
 
   def self.list(remote_path)
-    files = Dbox.metadata(remote_path)
-    files['contents'].each do |file|
-      puts file['path'][/[^\/]+$/]
+    files = Dbox::Syncer.api.list_folder(remote_path, recursive: false, get_all: true, include_deleted: false)
+    files.each do |file|
+      puts file.path_display.sub(/^.*\//, '')
     end
   end
 
