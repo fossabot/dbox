@@ -368,6 +368,10 @@ module Dbox
       end
     end
 
+    def delete_all_entries
+      @db.execute('DELETE FROM entries;')
+    end
+
     private
 
     def find_entry(conditions = "", *args)
