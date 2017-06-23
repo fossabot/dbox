@@ -209,9 +209,6 @@ module Dbox
         remove_tmpfiles
         dir = database.local_path
         found_paths = []
-        existing_entries_by_path = entries_hash_by_path
-        existing_entries_by_dropbox_id = entries_hash_by_dropbox_id
-        changelist = {created: [], deleted: [], updated: [], failed: [], moved: []}
         # grab the metadata for the current dir from Dropbox
         contents = gather_remote_info
 
@@ -226,9 +223,13 @@ module Dbox
           database.update_entry_by_id(entry[:id], dropbox_id: matching_content.id ) if matching_content
         end
 
+        existing_entries_by_path = entries_hash_by_path
+        existing_entries_by_dropbox_id = entries_hash_by_dropbox_id
+
         # Filter to the selected subdirs if the subdir param was used
         contents = contents.select {|c| in_subdir?(remote_to_relative_path(c.path_lower))} if local_subdirs
 
+        changelist = {created: [], deleted: [], updated: [], failed: [], moved: []}
         # process each entry that came back from dropbox/filesystem
         contents.each do |c|
           relative_path = remote_to_relative_path(c.path_lower)
