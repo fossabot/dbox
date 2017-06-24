@@ -87,11 +87,11 @@ module Dbox
         InsensitiveHash[res]
       when String
         res
-      when Net::HTTPNotFound
+      when ::Net::HTTPNotFound
         raise RemoteMissing, "#{path} does not exist on Dropbox"
-      when Net::HTTPForbidden
+      when ::Net::HTTPForbidden
         raise RequestDenied, "Operation on #{path} denied"
-      when Net::HTTPNotModified
+      when ::Net::HTTPNotModified
         :not_modified
       when true
         true
@@ -223,21 +223,21 @@ module Dbox
 
     def streaming_download(url, io, num_redirects = 0)
       url = URI.parse(url)
-      http = Net::HTTP.new(url.host, url.port)
+      http = ::Net::HTTP.new(url.host, url.port)
       http.use_ssl = true
       http.verify_mode = OpenSSL::SSL::VERIFY_NONE
       http.ca_file = Dropbox::TRUSTED_CERT_FILE
 
-      req = Net::HTTP::Get.new(url.request_uri)
+      req = ::Net::HTTP::Get.new(url.request_uri)
       req["User-Agent"] = "dbox"
 
       http.request(req) do |res|
-        if res.kind_of?(Net::HTTPSuccess)
+        if res.kind_of?(::Net::HTTPSuccess)
           # stream into given io
           res.read_body {|chunk| io.write(chunk) }
           true
         else
-          if res.kind_of?(Net::HTTPRedirection) && res.header['location'] && num_redirects < 10
+          if res.kind_of?(::Net::HTTPRedirection) && res.header['location'] && num_redirects < 10
             log.info("following redirect, num_redirects = #{num_redirects}")
             log.info("redirect url: #{res.header['location']}")
             streaming_download(res.header['location'], io, num_redirects + 1)
