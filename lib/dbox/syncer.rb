@@ -466,7 +466,7 @@ module Dbox
         dropbox_entries_to_delete.each do |c|
           begin
             if c.is_a?(Dropbox::FolderMetadata)
-              api.delete_dir(c.path_lower)
+              api.idempotent_delete_dir(c.path_lower)
             else
               api.idempotent_delete_file(c.path_lower)
             end

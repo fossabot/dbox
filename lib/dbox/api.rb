@@ -139,6 +139,12 @@ module Dbox
       end
     end
 
+    def idempotent_delete_dir(path)
+      delete_dir(path)
+    rescue Dropbox::ApiError => e
+      raise e unless e.message =~ /path_lookup\/not_found\//
+    end
+
     def delete_dir(path)
       run(path) do
         log.info "Deleting #{path}"

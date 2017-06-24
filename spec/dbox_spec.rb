@@ -816,6 +816,7 @@ describe Dbox do
         Dbox.push(@alternate, subdir: 'dir2')
 
         # Make more changes in Dropbox
+        Dbox.pull(@local)
         make_file "#{@local}/dir1/from_local.txt"
         FileUtils.rm("#{@local}/dir1/hello.txt")
         Dbox.push(@local)
