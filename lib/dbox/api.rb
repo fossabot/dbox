@@ -1,3 +1,5 @@
+require 'net/http'
+
 module Dbox
   NUM_TRIES = 3
   TIME_BETWEEN_TRIES = 3 # in seconds
