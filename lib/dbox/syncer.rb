@@ -75,7 +75,7 @@ module Dbox
 
       # path should be a relative path
       def in_subdir?(path)
-        local_subdirs.any? { |dir| path =~ /^#{dir}/ }
+        local_subdirs.any? { |dir| path.downcase =~ /^#{dir.downcase}/ }
       end
 
       def local_path
@@ -240,7 +240,7 @@ module Dbox
         contents.each do |c|
           relative_path = remote_to_relative_path(c.path_lower)
           relative_path_display = remote_to_relative_path(c.path_display)
-          local_path = relative_to_local_path(relative_path)
+          local_path = relative_to_local_path(relative_path).downcase
           local_path_display = relative_to_local_path(relative_path_display)
           remote_path = c.path_lower
           # Dropbox::FileMetadata => file. Dropbox::FolderMetadata => folder
@@ -273,7 +273,7 @@ module Dbox
               end
 
               # Download if necessary
-              content_hash = content_hash_file(local_path)
+              content_hash = content_hash_file(CaseInsensitiveFile.resolve(local_path))
               if content_hash != c.content_hash
                 log.debug("Updating #{local_path_display}")
                 res = download_file(local_path_display, remote_path, c.size)
@@ -397,9 +397,10 @@ module Dbox
         found_paths = []
 
         # Entries on the file system. Relative paths
-        existing_paths = list_contents(dir).sort.map(&:downcase)
+        existing_paths = list_contents(dir).sort
         existing_paths = existing_paths.select { |file| in_subdir?(file)} if local_subdirs
         existing_paths = existing_paths.reject { |file| blacklisted_extensions.include? File.extname(file) } if blacklisted_extensions
+        downcased_existing_paths = existing_paths.map(&:downcase)
 
         # Entries on Dropbox
         remote_contents = gather_remote_info
@@ -416,7 +417,7 @@ module Dbox
                        moved: [] }
 
         existing_paths.each do |p|
-          local_path = relative_to_local_path(p)
+          local_path = CaseInsensitiveFile.resolve relative_to_local_path(p)
           remote_path = relative_to_remote_path(p)
 
           log.debug("pushing #{local_path}")
@@ -447,8 +448,8 @@ module Dbox
 
             db_entry = {
               dropbox_id: dropbox_entry.id,
-              path_lower: dropbox_entry.path_lower,
-              path_display: dropbox_entry.path_display,
+              path_lower: remote_to_relative_path(dropbox_entry.path_lower),
+              path_display: remote_to_relative_path(dropbox_entry.path_display),
               local_hash: dropbox_entry.content_hash,
               modified: dropbox_entry.client_modified,
               revision: dropbox_entry.rev
@@ -459,7 +460,7 @@ module Dbox
         end
 
         dropbox_entries_to_delete = remote_contents.reject do |c|
-          existing_paths.include? remote_to_relative_path c.path_lower
+          downcased_existing_paths.include? remote_to_relative_path c.path_lower
         end
         log.debug("I should delete these files that are on Dropbox but not local: \n#{dropbox_entries_to_delete.inspect}")
 
