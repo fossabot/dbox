@@ -10,7 +10,6 @@ module Dbox
     include Loggable
 
     def self.create(remote_path, local_path, params = {})
-      puts "create with params: #{params.inspect}"
       api.create_dir(remote_path)
       clone(remote_path, local_path, params)
     end
@@ -265,7 +264,7 @@ module Dbox
               changed = false
               # Move if necessary
               current_local_path = relative_to_local_path(entry[:path_lower])
-              if current_local_path != local_path && CaseInsensitiveFile.exist?(current_local_path)
+              if current_local_path.downcase != local_path && CaseInsensitiveFile.exist?(current_local_path)
                 log.debug("moving #{current_local_path} to #{local_path_display}")
                 move_file(current_local_path, local_path_display)
                 changelist[:moved] << {entry[:path_lower] => relative_path_display}
