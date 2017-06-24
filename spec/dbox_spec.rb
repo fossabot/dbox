@@ -419,14 +419,14 @@ describe Dbox do
       expect(Dbox.push(@local)).to eql(created: ['subdir/foo.txt'], deleted: [], updated: [], failed: [], moved: [])
     end
 
-    it 'should create the remote dir if it is missing' do
+    it 'should fail if the remote is missing' do
       Dbox.create(@remote, @local)
       make_file "#{@local}/foo.txt"
       @new_name = randname
       @new_remote = File.join(REMOTE_TEST_PATH, @new_name)
       db = Dbox::Database.load(@local)
       db.update_metadata(remote_path: @new_remote)
-      expect(Dbox.push(@local)).to eql(created: ['foo.txt'], deleted: [], updated: [], failed: [], moved: [])
+      expect { Dbox.push(@local) }.to raise_error(Dbox::RemoteMissing)
     end
 
     it 'should not re-download the file after creating' do
@@ -484,9 +484,9 @@ describe Dbox do
       crazy_name1 = 'Day[J] #42'
       mkdir File.join(@local, crazy_name1)
       make_file File.join(@local, crazy_name1, 'foo.txt')
-      expect(Dbox.push(@local)).to eql(created: [crazy_name1.downcase, File.join(crazy_name1.downcase, 'foo.txt')], deleted: [], updated: [], failed: [], moved: [])
+      expect(Dbox.push(@local)).to eql(created: [crazy_name1, File.join(crazy_name1, 'foo.txt')], deleted: [], updated: [], failed: [], moved: [])
       rm_rf @local
-      expect(Dbox.clone(@remote, @local)).to eql(created: [File.join(crazy_name1.downcase, 'foo.txt')], deleted: [], updated: [], failed: [], moved: [])
+      expect(Dbox.clone(@remote, @local)).to eql(created: [File.join(crazy_name1, 'foo.txt')], deleted: [], updated: [], failed: [], moved: [])
     end
 
     it 'should be able to upload a bunch of files at the same time' do
