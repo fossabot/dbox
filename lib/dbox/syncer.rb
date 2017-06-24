@@ -362,7 +362,8 @@ module Dbox
 
       def download_file(local_path, remote_path, size)
         return if @practice
-        local_path = CaseInsensitiveFile.resolve(local_path)
+        # local_path does not necessarily exist yet, so we need to resolve to the directory, not the file
+        local_path = CaseInsensitiveFile.join(File.dirname(local_path), File.basename(local_path))
         path_lower = local_to_relative_path(local_path).downcase
 
         # stream files larger than the minimum
