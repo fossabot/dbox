@@ -9,9 +9,10 @@ module Dbox
 
     include Loggable
 
-    def self.create(remote_path, local_path)
+    def self.create(remote_path, local_path, params = {})
+      puts "create with params: #{params.inspect}"
       api.create_dir(remote_path)
-      clone(remote_path, local_path)
+      clone(remote_path, local_path, params)
     end
 
     def self.clone(remote_path, local_path, params = {})
@@ -295,7 +296,9 @@ module Dbox
 
         end
 
-          # Files in the DB that are not on Dropbox
+        return sort_changelist(changelist) if params[:noclobber]
+
+        # Files in the DB that are not on Dropbox
         dirs = case_insensitive_difference(existing_entries_by_path.keys, found_paths)
         # Files in the local filesystem that are not on Dropbox
         local_dirs = list_contents(dir)
