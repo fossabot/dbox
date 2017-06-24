@@ -20,6 +20,10 @@ LOGGER.formatter = proc do |severity, datetime, progname, msg|
   format "[%4.1fs] [%s] %s\n", (Time.now - $started_at), severity, msg
 end
 
+RSpec.configure do |c|
+  c.example_status_persistence_file_path = "/tmp/dbox-failing-examples.txt"
+end
+
 def randname
   u = `uuidgen`.chomp
   "test-#{u}"
