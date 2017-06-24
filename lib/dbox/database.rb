@@ -59,17 +59,15 @@ module Dbox
           version      integer NOT NULL
         );
         CREATE TABLE IF NOT EXISTS entries (
-          id           integer PRIMARY KEY AUTOINCREMENT NOT NULL,
-          path         text COLLATE NOCASE UNIQUE NOT NULL,
-          is_dir       boolean NOT NULL,
-          parent_id    integer REFERENCES entries(id) ON DELETE CASCADE,
-          local_hash   text,
-          remote_hash  text,
-          modified     datetime,
-          revision     text
+          id             integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+          dropbox_id     text,
+          path_lower     text UNIQUE NOT NULL,
+          path_display   text UNIQUE NOT NULL,
+          local_hash     text,
+          modified       datetime,
+          revision       text
         );
-        CREATE INDEX IF NOT EXISTS entry_parent_ids ON entries(parent_id);
-        CREATE INDEX IF NOT EXISTS entry_path ON entries(path);
+        CREATE INDEX IF NOT EXISTS entry_path ON entries(path_lower);
       })
     end
 
@@ -170,7 +168,7 @@ module Dbox
           unless entry[:is_dir]
             path = relative_to_local_path(entry[:path])
             if times_equal?(File.mtime(path), entry[:modified])
-              update_entry_by_id(entry[:id], :local_hash => calculate_hash(path))
+              update_entry_by_id(entry[:id], :local_hash => content_hash_file(path))
             end
           end
         end
@@ -226,18 +224,53 @@ module Dbox
           COMMIT;
         })
       end
+
+      if metadata[:version] < 6
+        log.info 'Migrating to database schema v6'
+
+        # Changes to use the Dropbox V2 API
+        @db.execute_batch(%{
+         BEGIN TRANSACTION;
+         ALTER TABLE entries RENAME TO entries_old;
+         CREATE TABLE entries (
+           id             integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+           dropbox_id     text,
+           path_lower     text UNIQUE NOT NULL,
+           path_display   text UNIQUE NOT NULL,
+           local_hash     text,
+           modified       datetime,
+           revision       text
+         );
+         INSERT INTO entries SELECT id, null, lower(path), path, null, modified, revision FROM entries_old WHERE NOT entries_old.is_dir;
+
+          -- recreate indexes
+          DROP INDEX IF EXISTS entry_parent_ids;
+          DROP INDEX IF EXISTS entry_path;
+          CREATE INDEX entry_path ON entries(path_lower);
+                          })
+
+        find_entries.each do |entry|
+          path = relative_to_local_path(entry[:path_lower])
+          hash = content_hash_file(path)
+          update_entry_by_id(entry[:id], local_hash: hash)
+        end
+
+        @db.execute_batch(%{
+          -- drop old table, update version and commit
+          DROP TABLE entries_old;
+          UPDATE metadata SET version = 6;
+          COMMIT;
+                          })
+      end
     end
 
     METADATA_COLS = [ :remote_path, :version ] # don't need to return id
-    ENTRY_COLS    = [ :id, :path, :is_dir, :parent_id, :local_hash, :remote_hash, :modified, :revision ]
+    ENTRY_COLS    = [ :id, :dropbox_id, :path_lower, :path_display, :local_hash, :modified, :revision ]
 
     def bootstrap(remote_path)
       @db.execute(%{
         INSERT INTO metadata (remote_path, version) VALUES (?, ?);
-      }, remote_path, 5)
-      @db.execute(%{
-        INSERT INTO entries (path, is_dir) VALUES (?, ?)
-      }, "", 1)
+      }, remote_path, 6)
     end
 
     def bootstrapped?
@@ -269,26 +302,25 @@ module Dbox
     end
 
     def root_dir
-      find_entry("WHERE parent_id is NULL")
+      find_entry("WHERE path_lower = ''")
     end
 
     def find_by_path(path)
       raise(ArgumentError, "path cannot be null") unless path
-      find_entry("WHERE path=?", path)
+      find_entry("WHERE path_lower=?", path)
     end
 
-    def contents(dir_id)
-      raise(ArgumentError, "dir_id cannot be null") unless dir_id
-      find_entries("WHERE parent_id=?", dir_id)
+    def find_by_dropbox_id(dropbox_id)
+      raise(ArgumentError, "dropbox_id cannot be null") unless dropbox_id
+      find_entry("WHERE dropbox_id=?", dropbox_id)
     end
 
-    def subdirs(dir_id)
-      raise(ArgumentError, "dir_id cannot be null") unless dir_id
-      find_entries("WHERE parent_id=? AND is_dir=1", dir_id)
+    def contents
+      find_entries()
     end
 
-    def add_entry(path, is_dir, parent_id, modified, revision, remote_hash, local_hash)
-      insert_entry(:path => path, :is_dir => is_dir, :parent_id => parent_id, :modified => modified, :revision => revision, :remote_hash => remote_hash, :local_hash => local_hash)
+    def add_entry(fields)
+      insert_entry(fields)
     end
 
     def update_entry_by_id(id, fields)
@@ -296,22 +328,32 @@ module Dbox
       update_entry(["WHERE id=?", id], fields)
     end
 
+    def update_entry_by_dropbox_id(dropbox_id, fields)
+      raise(ArgumentError, "dropbox_id cannot be null") unless dropbox_id
+      update_entry(["WHERE dropbox_id=?", dropbox_id], fields)
+    end
+
     def update_entry_by_path(path, fields)
       raise(ArgumentError, "path cannot be null") unless path
-      update_entry(["WHERE path=?", path], fields)
+      update_entry(["WHERE path_lower=?", path], fields)
     end
 
     def delete_entry_by_path(path)
       delete_entry_by_entry(find_by_path(path))
     end
 
+    def idempotent_delete_entry_by_path(path)
+      entry = find_by_path(path)
+      return unless entry
+      delete_entry_by_entry(entry)
+    end
+
+    def delete_entry_by_dropbox_id(dropbox_id)
+      delete_entry_by_entry(find_by_dropbox_id(dropbox_id))
+    end
+
     def delete_entry_by_entry(entry)
       raise(ArgumentError, "entry cannot be null") unless entry
-
-      # cascade delete children, if any
-      contents(entry[:id]).each {|child| delete_entry_by_entry(child) }
-
-      # delete main entry
       delete_entry("WHERE id=?", entry[:id])
     end
 
@@ -324,6 +366,10 @@ module Dbox
         new_parent = find_by_path(entry.path)
         entry.contents.each {|child_path, child| migrate_entry_from_old_db_format(child, new_parent) }
       end
+    end
+
+    def delete_all_entries
+      @db.execute('DELETE FROM entries;')
     end
 
     private
@@ -346,7 +392,7 @@ module Dbox
     def find_entries_with_columns(entry_cols, conditions = "", *args)
       out = []
       @db.execute(%{
-        SELECT #{entry_cols.join(",")} FROM entries #{conditions} ORDER BY path ASC;
+        SELECT #{entry_cols.join(",")} FROM entries #{conditions} ORDER BY path_lower ASC;
       }, *args) do |res|
         out << entry_res_to_fields(entry_cols, res)
       end
@@ -357,7 +403,6 @@ module Dbox
       log.debug "Inserting entry: #{fields.inspect}"
       h = fields.clone
       h[:modified]  = h[:modified].to_i if h[:modified]
-      h[:is_dir] = (h[:is_dir] ? 1 : 0) unless h[:is_dir].nil?
       @db.execute(%{
         INSERT INTO entries (#{h.keys.join(",")})
         VALUES (#{(["?"] * h.size).join(",")});

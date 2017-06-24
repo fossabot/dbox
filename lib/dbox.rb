@@ -2,7 +2,7 @@ ROOT_PATH = File.expand_path(File.join(File.dirname(__FILE__), ".."))
 $:.unshift File.join(ROOT_PATH, "lib")
 $:.unshift File.join(ROOT_PATH, "vendor")
 
-require "dropbox_sdk"
+require "dropbox"
 require "fileutils"
 require "time"
 require "yaml"
@@ -23,12 +23,12 @@ module Dbox
     Dbox::API.authorize
   end
 
-  def self.create(remote_path, local_path)
+  def self.create(remote_path, local_path, params = {})
     log.debug "Creating (remote: #{remote_path}, local: #{local_path})"
     remote_path = clean_remote_path(remote_path)
     local_path = clean_local_path(local_path)
     migrate_dbfile(local_path)
-    Dbox::Syncer.create(remote_path, local_path)
+    Dbox::Syncer.create(remote_path, local_path, params)
   end
 
   def self.clone(remote_path, local_path, params = {})
@@ -61,14 +61,6 @@ module Dbox
     Dbox::Syncer.push(local_path, params)
   end
 
-  def self.sync(local_path, params = {})
-    log.debug "Syncing (local: #{local_path})"
-    res = {}
-    res[:pull] = pull(local_path, params)
-    res[:push] = push(local_path, params)
-    res
-  end
-
   def self.move(new_remote_path, local_path)
     log.debug "Moving (new remote: #{new_remote_path}, local: #{local_path})"
     new_remote_path = clean_remote_path(new_remote_path)
@@ -95,9 +87,9 @@ module Dbox
   end
 
   def self.list(remote_path)
-    files = Dbox.metadata(remote_path)
-    files['contents'].each do |file|
-      puts file['path'][/[^\/]+$/]
+    files = Dbox::Syncer.api.list_folder(remote_path, recursive: false, get_all: true, include_deleted: false)
+    files.each do |file|
+      puts file.path_display.sub(/^.*\//, '')
     end
   end
 

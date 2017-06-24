@@ -1,4 +1,6 @@
 require 'case_insensitive_utils'
+require 'find'
+
 module Dbox
   class Syncer
     include CaseInsensitiveFile
@@ -7,9 +9,9 @@ module Dbox
 
     include Loggable
 
-    def self.create(remote_path, local_path)
+    def self.create(remote_path, local_path, params = {})
       api.create_dir(remote_path)
-      clone(remote_path, local_path)
+      clone(remote_path, local_path, params)
     end
 
     def self.clone(remote_path, local_path, params = {})
@@ -50,6 +52,14 @@ module Dbox
         @params = params
       end
 
+      def practice
+        @practice = true
+        changes = execute
+        log.debug "Changes that would be executed:\n" + changes.map {|c| c.inspect }.join("\n")
+      ensure
+        @practice = false
+      end
+
       def params
         @params
       end
@@ -62,6 +72,11 @@ module Dbox
         @_metadata ||= database.metadata
       end
 
+      # path should be a relative path
+      def in_subdir?(path)
+        local_subdirs.any? { |dir| path.downcase =~ /^#{dir.downcase}/ }
+      end
+
       def local_path
         metadata[:local_path]
       end
@@ -71,16 +86,17 @@ module Dbox
       end
 
       def blacklisted_extensions
-        params[:blacklisted_extensions]
+        return unless params[:blacklisted_extensions]
+        params[:blacklisted_extensions].split(/,/).map(&:downcase)
       end
 
-      def remove_dotfiles(contents)
-        contents.reject {|c| File.basename(c[:path]).start_with?(".") }
+      def remove_dotfiles(files)
+        files.reject {|f| File.basename(f.path_lower).start_with?(".") }
       end
 
-      def remove_blacklisted_extensions(contents)
-        return contents unless blacklisted_extensions
-        contents.reject { |c| !c[:is_dir] && blacklisted_extensions.include?(File.extname(c[:path]).downcase) }
+      def remove_blacklisted_extensions(files)
+        return files unless blacklisted_extensions
+        files.reject { |f| f.is_a?(Dropbox::FileMetadata) && blacklisted_extensions.include?(File.extname(f.path_lower))}
       end
 
       def remote_subdirs
@@ -95,14 +111,33 @@ module Dbox
         params[:subdir].split(/,/)
       end
 
-      def current_dir_entries_as_hash(dir)
-        if dir[:id]
-          out = InsensitiveHash.new
-          database.contents(dir[:id]).each {|e| out[e[:path]] = e }
-          out
-        else
-          {}
+      def entries_hash_by_path
+        out = InsensitiveHash.new
+        database.contents.each_with_object(InsensitiveHash.new) do |entry, h|
+          next unless entry[:path_lower]
+          next if blacklisted_extensions && blacklisted_extensions.include?(File.extname(entry[:path_lower]))
+          h[entry[:path_lower]] = entry
         end
+
+      end
+
+      def entries_hash_by_dropbox_id
+        database.contents.each_with_object(InsensitiveHash.new) do |entry, h|
+          next unless entry[:dropbox_id]
+          next if blacklisted_extensions && blacklisted_extensions.include?(File.extname(entry[:path_lower]))
+          h[entry[:dropbox_id]] = entry
+        end
+      end
+
+      # returns all of the relative paths for a local directory
+      # ignoring files and directories that start with ".".
+      def list_contents(dir)
+        paths = []
+        Find.find(dir) do |path|
+          Find.prune if File.basename(path)[0] == '.'
+          paths << local_to_relative_path(path)
+        end
+        paths
       end
 
       def lookup_id_by_path(path)
@@ -131,47 +166,21 @@ module Dbox
         end
       end
 
-      def gather_remote_info(entry)
-        res = api.metadata(entry[:remote_path], entry[:remote_hash])
-        case res
-        when Hash
-          out = process_basic_remote_props(res)
-          out[:id] = entry[:id] if entry[:id]
-          if res[:contents]
-            contents = remove_dotfiles(res[:contents])
-            contents = remove_blacklisted_extensions(contents)
-            out[:contents] = contents.map do |c|
-              o = process_basic_remote_props(c)
-              o[:parent_id] = entry[:id] if entry[:id]
-              o[:parent_path] = entry[:path]
-              o
-            end
-          end
-          out
-        when :not_modified
-          :not_modified
+      def gather_remote_info
+        res = api.list_folder(database.metadata[:remote_path], recursive: true, get_all: true)
+        if res.is_a?(Array) && res.all? {|r| r.is_a?(Dropbox::FileMetadata) || r.is_a?(Dropbox::FolderMetadata)}
+          res = remove_dotfiles(res)
+          res = remove_blacklisted_extensions(res)
+          res
         else
           raise(RuntimeError, "Invalid result from server: #{res.inspect}")
         end
       end
 
-      def process_basic_remote_props(res)
-        out = {}
-        out[:path]        = remote_to_relative_path(res[:path])
-        out[:local_path]  = relative_to_local_path(out[:path])
-        out[:remote_path] = relative_to_remote_path(out[:path])
-        out[:modified]    = parse_time(res[:modified])
-        out[:is_dir]      = res[:is_dir]
-        out[:remote_hash] = res[:hash] if res[:hash]
-        out[:revision]    = res[:rev] if res[:rev]
-        out[:size]        = res[:bytes] if res[:bytes]
-        out
-      end
-
       def generate_tmpfilename(path)
         out = CaseInsensitiveFile.join(local_path, ".#{path.gsub(/\W/, '-')}.part")
         if CaseInsensitiveFile.exists?(out)
-          generate_tmpfilename("path#{rand(1000)}")
+          generate_tmpfilename("path#{rand(1_000_000)}")
         else
           out
         end
@@ -184,9 +193,9 @@ module Dbox
       def sort_changelist(changelist)
         changelist.keys.each do |k|
           case k
-          when :conflicts
-            changelist[k].sort! {|c1, c2| c1[:original] <=> c2[:original] }
           when :failed
+            changelist[k].sort! {|c1, c2| c1[:path] <=> c2[:path] }
+          when :moved
             changelist[k].sort! {|c1, c2| c1[:path] <=> c2[:path] }
           else
             changelist[k].sort!
@@ -201,169 +210,124 @@ module Dbox
         super(database, api, params)
       end
 
-      def practice
-        dir = database.root_dir
-        changes = calculate_changes(dir)
-        log.debug "Changes that would be executed:\n" + changes.map {|c| c.inspect }.join("\n")
-      end
-
       def execute
         remove_tmpfiles
-        dir = database.root_dir
-        changes = calculate_changes(dir)
-        log.debug "Executing changes:\n" + changes.map {|c| c.inspect }.join("\n")
-        parent_ids_of_failed_entries = []
-        changelist = { :created => [], :deleted => [], :updated => [], :failed => [] }
-        changes.each do |op, c|
-          # We want to include paths up to and including the remote_subdirs, and also paths that have the remote_subdirs as their root
-          if remote_subdirs && !remote_subdirs.any? {|dir| c[:remote_path].index(dir) == 0 || dir.index(c[:remote_path]) == 0}
-            if op == :create && c[:is_dir] && !database.find_by_path(c[:path])
-              database.add_entry(c[:path], true, c[:parent_id], c[:modified], c[:revision], nil, nil)
-            end
-            next
+        dir = database.local_path
+        found_paths = []
+        # grab the metadata for the current dir from Dropbox
+        contents = gather_remote_info
+
+        # The first time you download via V2 of the API, you need to stick the
+        # dropbox_id in the DB.
+        # We don't do this in the migration as the DB class has no access to the
+        # API.
+        database.contents.reject { |entry| entry[:dropbox_id] }.each do |entry|
+          matching_content = contents.detect do |content|
+            content.is_a?(Dropbox::FileMetadata) && remote_to_relative_path(content.path_lower) == entry[:path_lower]
           end
-          case op
-          when :create
-            c[:parent_id] ||= lookup_id_by_path(c[:parent_path])
-            if c[:is_dir]
-              create_dir(c)
-              database.find_by_path(c[:path]) ? database.update_entry_by_path(c[:path], :modified => c[:modified], :revision => c[:revision], :remote_hash => c[:remote_hash]) : database.add_entry(c[:path], true, c[:parent_id], c[:modified], c[:revision], c[:remote_hash], nil)
-              changelist[:created] << c[:path]
-            # create the local directory
-            else
-              # download the new file
-              begin
-                res = create_file(c)
-                local_hash = calculate_hash(c[:local_path])
-                database.add_entry(c[:path], false, c[:parent_id], c[:modified], c[:revision], c[:remote_hash], local_hash)
-                changelist[:created] << c[:path]
-                if res.kind_of?(Array) && res[0] == :conflict
-                  changelist[:conflicts] ||= []
-                  changelist[:conflicts] << res[1]
-                end
-              rescue => e
-                log.error "Error while downloading #{c[:path]}: #{e.inspect}\n#{e.backtrace.join("\n")}"
-                parent_ids_of_failed_entries << c[:parent_id]
-                changelist[:failed] << { :operation => :create, :path => c[:path], :error => e }
-              end
-            end
-          when :update
-            if c[:is_dir]
-              # update the local directory
-              create_dir(c)
-              update_dir(c)
-              database.update_entry_by_path(c[:path], :modified => c[:modified], :revision => c[:revision], :remote_hash => c[:remote_hash])
-              changelist[:updated] << c[:path]
-            else
-              # download updates to the file
-              begin
-                res = update_file(c)
-                local_hash = calculate_hash(c[:local_path])
-                database.update_entry_by_path(c[:path], :modified => c[:modified], :revision => c[:revision], :remote_hash => c[:remote_hash], :local_hash => local_hash)
-                changelist[:updated] << c[:path]
-                if res.kind_of?(Array) && res[0] == :conflict
-                  changelist[:conflicts] ||= []
-                  changelist[:conflicts] << res[1]
-                end
-              rescue => e
-                log.error "Error while downloading #{c[:path]}: #{e.inspect}\n#{e.backtrace.join("\n")}"
-                parent_ids_of_failed_entries << c[:parent_id]
-                changelist[:failed] << { :operation => :create, :path => c[:path], :error => e }
-              end
-            end
-          when :delete
-            # delete the local directory/file
-            c[:is_dir] ? delete_dir(c) : delete_file(c)
-            database.delete_entry_by_path(c[:path])
-            changelist[:deleted] << c[:path]
-          when :failed
-            parent_ids_of_failed_entries << c[:parent_id]
-            changelist[:failed] << { :operation => c[:operation], :path => c[:path], :error => c[:error] }
-          else
-            raise(RuntimeError, "Unknown operation type: #{op}")
-          end
+          database.update_entry_by_id(entry[:id], dropbox_id: matching_content.id ) if matching_content
         end
 
-        # clear hashes on any dirs with children that failed so that
-        # they are processed again on next pull
-        parent_ids_of_failed_entries.uniq.each do |id|
-          database.update_entry_by_id(id, :remote_hash => nil)
+        existing_entries_by_path = entries_hash_by_path
+        existing_entries_by_dropbox_id = entries_hash_by_dropbox_id
+
+        # Filter to the selected subdirs if the subdir param was used
+        contents = contents.select {|c| in_subdir?(remote_to_relative_path(c.path_lower))} if local_subdirs
+
+        changelist = {created: [], deleted: [], updated: [], failed: [], moved: []}
+        # process each entry that came back from dropbox/filesystem
+        contents.each do |c|
+          relative_path = remote_to_relative_path(c.path_lower)
+          relative_path_display = remote_to_relative_path(c.path_display)
+          local_path = relative_to_local_path(relative_path).downcase
+          local_path_display = relative_to_local_path(relative_path_display)
+          remote_path = c.path_lower
+          # Dropbox::FileMetadata => file. Dropbox::FolderMetadata => folder
+          meta_type = c.class.to_s.split(/::/).last.sub('Metadata', '').downcase
+          log.debug("Executing changes for #{c.path_lower} of type #{meta_type}")
+          case meta_type
+          when 'folder'
+            found_paths << relative_path
+            create_dir(local_path_display)
+          when 'file'
+            updated_entry = {
+              dropbox_id: c.id,
+              path_lower: remote_to_relative_path(c.path_lower),
+              path_display: remote_to_relative_path(c.path_display),
+              local_hash: c.content_hash,
+              modified: c.server_modified,
+              revision: c.rev
+            }
+            create_dir(CaseInsensitiveFile.dirname(local_path_display))
+            found_paths << relative_path
+            if entry = existing_entries_by_dropbox_id[c.id]
+              changed = false
+              # Move if necessary
+              current_local_path = relative_to_local_path(entry[:path_lower])
+              if current_local_path.downcase != local_path && CaseInsensitiveFile.exist?(current_local_path)
+                log.debug("moving #{current_local_path} to #{local_path_display}")
+                move_file(current_local_path, local_path_display)
+                changelist[:moved] << {entry[:path_lower] => relative_path_display}
+                changed = true
+              end
+
+              # Download if necessary
+              content_hash = content_hash_file(CaseInsensitiveFile.resolve(local_path))
+              if content_hash != c.content_hash
+                log.debug("Updating #{local_path_display}")
+                res = download_file(local_path_display, remote_path, c.size)
+                changed = true
+                changelist[:updated] << relative_path_display
+              end
+
+              if changed && !@practice
+                database.update_entry_by_dropbox_id(c.id, updated_entry)
+              end
+            else
+              # Create the new file
+              res = download_file(local_path_display, remote_path, c.size)
+              # TODO Add the new file to the DB
+              changelist[:created] << relative_path_display
+              log.debug("Creating #{local_path_display}")
+              database.add_entry(updated_entry) unless @practice
+            end
+          end
+
+        end
+
+        return sort_changelist(changelist) if params[:noclobber]
+
+        # Files in the DB that are not on Dropbox
+        dirs = case_insensitive_difference(existing_entries_by_path.keys, found_paths)
+        # Files in the local filesystem that are not on Dropbox
+        local_dirs = list_contents(dir)
+        dirs += case_insensitive_difference(local_dirs, found_paths)
+
+        dirs.uniq!
+        dirs = dirs.select { |file| in_subdir?(file)} if local_subdirs
+        dirs = dirs.reject { |file| blacklisted_extensions.include? File.extname(file) } if blacklisted_extensions
+        log.debug("Deleting these dirs:")
+        log.debug(dirs)
+        dirs.each do |p|
+          delete_file_or_folder_and_db_entry(p, changelist)
         end
 
         # sort & return output
         sort_changelist(changelist)
       end
 
-      def calculate_changes(dir, operation = :update)
-        raise(ArgumentError, "Not a directory: #{dir.inspect}") unless dir[:is_dir]
-
-        out = []
-        recur_dirs = []
-
-        # grab the metadata for the current dir (either off the filesystem or from Dropbox)
-        res = gather_remote_info(dir)
-        if res == :not_modified
-          # directory itself was not modified, but we still need to
-          # recur on subdirectories
-          recur_dirs += database.subdirs(dir[:id]).map {|d| [:update, d] }
-        else
-          raise(ArgumentError, "Not a directory: #{res.inspect}") unless res[:is_dir]
-
-          # dir may have changed -- calculate changes on contents
-          contents = res.delete(:contents)
-          if operation == :create || modified?(dir, res)
-            res[:parent_id] = dir[:parent_id] if dir[:parent_id]
-            res[:parent_path] = dir[:parent_path] if dir[:parent_path]
-            out << [operation, res]
+      def delete_file_or_folder_and_db_entry(path_lower, changelist)
+        local_path = relative_to_local_path(path_lower)
+        if CaseInsensitiveFile.exist?(local_path)
+          if CaseInsensitiveFile.file?(local_path)
+            delete_file(local_path)
+            # TODO remove the entry from the DB
+          else
+            delete_dir(local_path)
           end
-          found_paths = []
-          existing_entries = current_dir_entries_as_hash(dir)
-
-          # process each entry that came back from dropbox/filesystem
-          contents.each do |c|
-            found_paths << c[:path]
-            if entry = existing_entries[c[:path]]
-              c[:id] = entry[:id]
-              c[:modified] = parse_time(c[:modified])
-              if c[:is_dir]
-                # queue dir for later
-                c[:remote_hash] = entry[:remote_hash]
-                recur_dirs << [:update, c]
-              else
-                # update iff modified
-                out << [:update, c] if modified?(entry, c)
-              end
-            else
-              # create
-              c[:modified] = parse_time(c[:modified])
-              if c[:is_dir]
-                # queue dir for later
-                recur_dirs << [:create, c]
-              else
-                out << [:create, c]
-              end
-            end
-          end
-
-          # add any deletions
-          dirs = case_insensitive_difference(existing_entries.keys, found_paths)
-          dirs = dirs.select { |file| local_subdirs.any? { |dir| file =~ /^#{dir}/ }} if local_subdirs
-          out += dirs.map do |p|
-            [:delete, existing_entries[p]]
-          end
+          database.idempotent_delete_entry_by_path(path_lower) unless @practice
+          changelist[:deleted] << local_to_relative_path(local_path)
         end
-
-        # recursively process new & existing subdirectories in parallel
-        recur_dirs.each do |operation, dir|
-          begin
-            out += calculate_changes(dir, operation)
-          rescue => e
-            log.error "Error while caclulating changes for #{operation} on #{dir[:path]}: #{e.inspect}\n#{e.backtrace.join("\n")}"
-            out += [[:failed, dir.merge({ :operation => operation, :error => e })]]
-          end
-        end
-
-        out
       end
 
       def modified?(entry, res)
@@ -374,86 +338,49 @@ module Dbox
         out
       end
 
-      def create_dir(dir)
-        local_path = dir[:local_path]
+      def create_dir(local_path)
         log.info "Creating #{local_path}"
-        return if CaseInsensitiveFile.exists?(local_path)
-        saving_parent_timestamp(dir) do
-          CaseInsensitiveFile.mkdir_p(local_path)
-          update_file_timestamp(dir)
-        end
+        return :exists if CaseInsensitiveFile.exists?(local_path)
+        return if @practice
+        CaseInsensitiveFile.mkdir_p(local_path)
       end
 
-      def update_dir(dir)
-        update_file_timestamp(dir)
-      end
-
-      def delete_dir(dir)
-        local_path = dir[:local_path]
+      def delete_dir(local_path)
         log.info "Deleting #{local_path}"
-        saving_parent_timestamp(dir) do
-          CaseInsensitiveFile.rm_rf(local_path)
-        end
+        return if @practice
+        CaseInsensitiveFile.rm_rf(local_path)
       end
 
-      def create_file(file)
-        saving_parent_timestamp(file) do
-          download_file(file)
-        end
-      end
-
-      def update_file(file)
-        download_file(file)
-      end
-
-      def delete_file(file)
-        local_path = file[:local_path]
+      def delete_file(local_path)
         log.info "Deleting file: #{local_path}"
-        saving_parent_timestamp(file) do
-          CaseInsensitiveFile.rm_f(local_path)
-        end
+        return if @practice
+        CaseInsensitiveFile.rm_f(local_path)
       end
 
-      def download_file(file)
-        local_path = CaseInsensitiveFile.resolve(file[:local_path])
-        local_path = CaseInsensitiveFile.join(File.dirname(local_path), File.basename(local_path))
-        remote_path = file[:remote_path]
+      def move_file(original_local_path, final_local_path)
+        return if @practice
+        CaseInsensitiveFile.mv(original_local_path, final_local_path)
+      end
 
-        # check to ensure we aren't overwriting an untracked file or a
-        # file with local modifications
-        clobbering = false
-        if entry = database.find_by_path(file[:path])
-          clobbering = calculate_hash(local_path) != entry[:local_hash]
-        else
-          clobbering = CaseInsensitiveFile.exists?(local_path)
-        end
+      def download_file(local_path, remote_path, size)
+        return if @practice
+        # local_path does not necessarily exist yet, so we need to resolve to the directory, not the file
+        local_path = CaseInsensitiveFile.join(File.dirname(local_path), File.basename(local_path))
+        path_lower = local_to_relative_path(local_path).downcase
 
         # stream files larger than the minimum
-        stream = file[:size] && file[:size] > MIN_BYTES_TO_STREAM_DOWNLOAD
+        stream = size && size > MIN_BYTES_TO_STREAM_DOWNLOAD
 
         # download to temp file
-        tmp = generate_tmpfilename(file[:path])
+        tmp = generate_tmpfilename(path_lower)
         CaseInsensitiveFile.open(tmp, "wb") do |f|
           api.get_file(remote_path, f, stream)
         end
 
-        # rename old file if clobbering
-        if clobbering && CaseInsensitiveFile.exists?(local_path)
-          backup_path = find_nonconflicting_path(local_path)
-          CaseInsensitiveFile.mv(local_path, backup_path)
-          backup_relpath = local_to_relative_path(backup_path)
-          log.warn "#{file[:path]} had a conflict and the existing copy was renamed to #{backup_relpath} locally"
-        end
-
-        # atomic move over to the real file, and update the timestamp
+        # atomic move over to the real file
         CaseInsensitiveFile.mv(tmp, local_path)
-        update_file_timestamp(file)
 
-        if backup_relpath
-          [:conflict, { :original => file[:path], :renamed => backup_relpath }]
-        else
-          true
-        end
+        true
       end
 
     end
@@ -463,154 +390,93 @@ module Dbox
         super(database, api, params)
       end
 
-      def practice
-        dir = database.root_dir
-        changes = calculate_changes(dir)
-        log.debug "Changes that would be executed:\n" + changes.map {|c| c.inspect }.join("\n")
-      end
-
       def execute
-        dir = database.root_dir
-        changes = calculate_changes(dir)
-        log.debug "Executing changes:\n" + changes.map {|c| c.inspect }.join("\n")
-        changelist = { :created => [], :deleted => [], :updated => [], :failed => [] }
+        remove_tmpfiles
+        dir = database.local_path
+        found_paths = []
 
-        changes.each do |op, c|
-          # We want to include paths up to and including the remote_subdirs, and also paths that have the remote_subdirs as their root
-          if remote_subdirs && !remote_subdirs.any? {|dir| c[:remote_path].index(dir) == 0 || dir.index(c[:remote_path]) == 0}
-            if op == :create && c[:is_dir] && !database.find_by_path(c[:path])
-              database.add_entry(c[:path], true, c[:parent_id], c[:modified], c[:revision], nil, nil)
-            end
-            next
-          end
+        # Entries on the file system. Relative paths
+        existing_paths = list_contents(dir).sort
+        existing_paths = existing_paths.select { |file| in_subdir?(file)} if local_subdirs
+        existing_paths = existing_paths.reject { |file| blacklisted_extensions.include? File.extname(file) } if blacklisted_extensions
+        downcased_existing_paths = existing_paths.map(&:downcase)
 
-          case op
-          when :create
-            c[:parent_id] ||= lookup_id_by_path(c[:parent_path])
+        # Entries on Dropbox
+        remote_contents = gather_remote_info
+        # Filter to the selected subdirs if the subdir param was used
+        remote_contents = remote_contents.select {|c| in_subdir?(remote_to_relative_path(c.path_lower))} if local_subdirs
 
-            if c[:is_dir]
-              # create the remote directiory
-              create_dir(c)
-              database.find_by_path(c[:path]) ? database.update_entry_by_path(c[:path], :modified => c[:modified], :revision => c[:revision], :remote_hash => c[:remote_hash]) : database.add_entry(c[:path], true, c[:parent_id], nil, nil, nil, nil)
-              force_metadata_update_from_server(c)
-              changelist[:created] << c[:path]
-            else
-              # upload a new file
-              begin
-                local_hash = calculate_hash(c[:local_path])
-                res = upload_file(c)
-                database.add_entry(c[:path], false, c[:parent_id], nil, nil, nil, local_hash)
-                if case_insensitive_equal(c[:path], res[:path])
-                  force_metadata_update_from_server(c)
-                  changelist[:created] << c[:path]
-                else
-                  log.warn "#{c[:path]} had a conflict and was renamed to #{res[:path]} on the server"
-                  changelist[:conflicts] ||= []
-                  changelist[:conflicts] << { :original => c[:path], :renamed => res[:path] }
-                end
-              rescue => e
-                log.error "Error while uploading #{c[:path]}: #{e.inspect}\n#{e.backtrace.join("\n")}"
-                changelist[:failed] << { :operation => :create, :path => c[:path], :error => e }
-              end
-            end
-          when :update
-            existing = database.find_by_path(c[:path])
-            unless existing[:is_dir] == c[:is_dir]
-              raise(RuntimeError, "Mode on #{c[:path]} changed between file and dir -- not supported yet")
+        # Blow away the entries DB
+        database.delete_all_entries
+
+        changelist = { created: [],
+                       deleted: [],
+                       updated: [],
+                       failed: [],
+                       moved: [] }
+
+        existing_paths.each do |p|
+          local_path = CaseInsensitiveFile.resolve relative_to_local_path(p)
+          remote_path = relative_to_remote_path(p)
+
+          log.debug("pushing #{local_path}")
+          if CaseInsensitiveFile.directory?(local_path)
+            dropbox_entry = remote_contents.detect do |c|
+              c.is_a?(Dropbox::FolderMetadata) && c.path_lower == relative_to_remote_path(p).downcase
             end
 
-            # only update files -- nothing to do to update a dir
-            if !c[:is_dir]
-              # upload changes to a file
-              begin
-                local_hash = calculate_hash(c[:local_path])
-                res = upload_file(c)
-                database.update_entry_by_path(c[:path], :local_hash => local_hash)
-                if case_insensitive_equal(c[:path], res[:path])
-                  force_metadata_update_from_server(c)
-                  changelist[:updated] << c[:path]
-                else
-                  log.warn "#{c[:path]} had a conflict and was renamed to #{res[:path]} on the server"
-                  changelist[:conflicts] ||= []
-                  changelist[:conflicts] << { :original => c[:path], :renamed => res[:path] }
-                end
-              rescue => e
-                log.error "Error while uploading #{c[:path]}: #{e.inspect}\n#{e.backtrace.join("\n")}"
-                changelist[:failed] << { :operation => :update, :path => c[:path], :error => e }
-              end
-            end
-          when :delete
-            # delete a remote file/directory
-            begin
-              begin
-                if c[:is_dir]
-                  delete_dir(c)
-                else
-                  delete_file(c)
-                end
-              rescue Dbox::RemoteMissing
-                # safe to delete even if remote is already gone
-              end
-              database.delete_entry_by_path(c[:path])
-              changelist[:deleted] << c[:path]
-            rescue => e
-              log.error "Error while deleting #{c[:path]}: #{e.inspect}\n#{e.backtrace.join("\n")}"
-              changelist[:failed] << { :operation => :delete, :path => c[:path], :error => e }
-            end
-          when :failed
-            changelist[:failed] << { :operation => c[:operation], :path => c[:path], :error => c[:error] }
+            next if dropbox_entry # All good, no need to do anything else
+            api.create_dir(remote_path)
+            changelist[:created] << p
           else
-            raise(RuntimeError, "Unknown operation type: #{op}")
+            content_hash = content_hash_file(local_path)
+            dropbox_entry = remote_contents.detect do |c|
+              c.is_a?(Dropbox::FileMetadata) && c.path_lower == relative_to_remote_path(p).downcase
+            end
+
+            if dropbox_entry.nil? || content_hash != dropbox_entry.content_hash
+              # Need to upload the file
+              new_dropbox_entry = api.put_file(remote_path, local_path)
+              if dropbox_entry
+                changelist[:updated] << p
+              else
+                changelist[:created] << p
+              end
+              dropbox_entry = new_dropbox_entry
+            end
+
+            db_entry = {
+              dropbox_id: dropbox_entry.id,
+              path_lower: remote_to_relative_path(dropbox_entry.path_lower),
+              path_display: remote_to_relative_path(dropbox_entry.path_display),
+              local_hash: dropbox_entry.content_hash,
+              modified: dropbox_entry.client_modified,
+              revision: dropbox_entry.rev
+            }
+
+            database.add_entry(db_entry)
           end
         end
 
+        dropbox_entries_to_delete = remote_contents.reject do |c|
+          downcased_existing_paths.include? remote_to_relative_path c.path_lower
+        end
+        log.debug("I should delete these files that are on Dropbox but not local: \n#{dropbox_entries_to_delete.inspect}")
+
+        dropbox_entries_to_delete.each do |c|
+          begin
+            if c.is_a?(Dropbox::FolderMetadata)
+              api.idempotent_delete_dir(c.path_lower)
+            else
+              api.idempotent_delete_file(c.path_lower)
+            end
+            changelist[:deleted] << remote_to_relative_path(c.path_lower)
+          rescue Dbox::RemoteMissing
+            # safe to delete even if remote is already gone
+          end
+        end
         # sort & return output
         sort_changelist(changelist)
-      end
-
-      def calculate_changes(dir)
-        raise(ArgumentError, "Not a directory: #{dir.inspect}") unless dir[:is_dir]
-
-        out = []
-        recur_dirs = []
-
-        existing_entries = current_dir_entries_as_hash(dir)
-        child_paths = list_contents(dir).sort
-
-        child_paths.each do |p|
-          local_path = relative_to_local_path(p)
-          remote_path = relative_to_remote_path(p)
-          c = {
-            :path => p,
-            :local_path => local_path,
-            :remote_path => remote_path,
-            :modified => mtime(local_path),
-            :is_dir => is_dir(local_path),
-            :parent_path => dir[:path],
-            :local_hash => calculate_hash(local_path)
-          }
-          if entry = existing_entries[p]
-            c[:id] = entry[:id]
-            recur_dirs << c if c[:is_dir] # queue dir for later
-            out << [:update, c] if modified?(entry, c) # update iff modified
-          else
-            # create
-            out << [:create, c]
-            recur_dirs << c if c[:is_dir]
-          end
-        end
-
-        # add any deletions
-        out += case_insensitive_difference(existing_entries.keys, child_paths).map do |p|
-          [:delete, existing_entries[p]]
-        end
-
-        # recursively process new & existing subdirectories
-        recur_dirs.each do |dir|
-          out += calculate_changes(dir)
-        end
-
-        out
       end
 
       def mtime(path)
@@ -635,12 +501,6 @@ module Dbox
         out
       end
 
-      def list_contents(dir)
-        local_path = dir[:local_path]
-        paths = Dir.entries(local_path).reject {|s| s == "." || s == ".." || s.start_with?(".") }
-        paths.map {|p| local_to_relative_path(File.join(local_path, p)) }
-      end
-
       def create_dir(dir)
         remote_path = dir[:remote_path]
         log.info "Creating #{remote_path}"
@@ -663,11 +523,10 @@ module Dbox
         db_entry = database.find_by_path(file[:path])
         last_revision = db_entry ? db_entry[:revision] : nil
         res = api.put_file(remote_path, local_path, last_revision)
-        process_basic_remote_props(res)
       end
 
       def force_metadata_update_from_server(entry)
-        res = gather_remote_info(entry)
+        res = gather_remote_info
         unless res == :not_modified
           database.update_entry_by_path(entry[:path], :modified => res[:modified], :revision => res[:revision], :remote_hash => res[:remote_hash])
         end

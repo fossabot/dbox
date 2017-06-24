@@ -20,6 +20,10 @@ LOGGER.formatter = proc do |severity, datetime, progname, msg|
   format "[%4.1fs] [%s] %s\n", (Time.now - $started_at), severity, msg
 end
 
+RSpec.configure do |c|
+  c.example_status_persistence_file_path = "/tmp/dbox-failing-examples.txt"
+end
+
 def randname
   u = `uuidgen`.chomp
   "test-#{u}"
@@ -39,6 +43,10 @@ end
 
 def make_file(filepath, size_in_kb=1)
   `dd if=/dev/urandom of="#{filepath.gsub('"','\"')}" bs=1024 count=#{size_in_kb} 1>/dev/null 2>/dev/null`
+end
+
+def read_file(filepath)
+  File.read(filepath)
 end
 
 def rename_file(oldpath, newpath)

@@ -7,6 +7,7 @@ module Dbox
   class RemoteMissing < RuntimeError; end
   class RemoteAlreadyExists < RuntimeError; end
   class RequestDenied < RuntimeError; end
+  class InvalidResponse < RuntimeError; end
 
   class API
     include Loggable
@@ -14,7 +15,7 @@ module Dbox
     def self.authorize
       app_key = ENV["DROPBOX_APP_KEY"]
       app_secret = ENV["DROPBOX_APP_SECRET"]
-      
+
       raise(ConfigurationError, "Please set the DROPBOX_APP_KEY environment variable to a Dropbox application key") unless app_key
       raise(ConfigurationError, "Please set the DROPBOX_APP_SECRET environment variable to a Dropbox application secret") unless app_secret
 
@@ -30,7 +31,7 @@ module Dbox
 
       # This will fail if the user gave us an invalid authorization code
       access_token, user_id = flow.finish(code)
-      
+
       puts "export DROPBOX_ACCESS_TOKEN=#{access_token}"
       puts "export DROPBOX_USER_ID=#{user_id}"
       puts
@@ -61,48 +62,27 @@ module Dbox
     def connect
       access_token = ENV["DROPBOX_ACCESS_TOKEN"]
       access_type = ENV["DROPBOX_ACCESS_TYPE"] || "dropbox"
-      
+
       raise(ConfigurationError, "Please set the DROPBOX_ACCESS_TOKEN environment variable to a Dropbox access token") unless access_token
       raise(ConfigurationError, "Please set the DROPBOX_ACCESS_TYPE environment variable either dropbox (full access) or sandbox (App access)") unless access_type == "dropbox" || access_type == "app_folder"
-      @client = DropboxClient.new(access_token)
+      @client = Dropbox::Client.new(access_token)
     end
 
     def run(path, tries = NUM_TRIES, &proc)
       begin
         res = proc.call
         handle_response(path, res) { raise RuntimeError, "Unexpected result: #{res.inspect}" }
-      rescue DropboxNotModified => e
-        :not_modified
-      rescue DropboxAuthError => e
-        raise e
-      rescue DropboxError => e
-        if tries > 0
-          if e.http_response.kind_of?(Net::HTTPServiceUnavailable)
-            log.info "Encountered 503 on #{path} (likely rate limiting). Sleeping #{TIME_BETWEEN_TRIES}s and trying again."
-            # TODO check for "Retry-After" header and use that for sleep instead of TIME_BETWEEN_TRIES
-            log.info "Headers: #{e.http_response.to_hash.inspect}"
-          else
-            log.info "Encountered a dropbox error. Sleeping #{TIME_BETWEEN_TRIES}s and trying again. Error: #{e.inspect}"
-            log.info "Headers: #{e.http_response.to_hash.inspect}"
-          end
-          sleep TIME_BETWEEN_TRIES
-          run(path, tries - 1, &proc)
-        else
-          handle_response(path, e.http_response) { raise ServerError, "Server error -- might be a hiccup, please try your request again (#{e.message})" }
-        end
-      rescue => e
-        if tries > 0
-          log.info "Encounted an unknown error. Sleeping #{TIME_BETWEEN_TRIES}s and trying again. Error: #{e.inspect}"
-          sleep TIME_BETWEEN_TRIES
-          run(path, tries - 1, &proc)
-        else
-          raise e
-        end
       end
     end
 
     def handle_response(path, res, &else_proc)
       case res
+      when Dropbox::DeletedMetadata
+        raise RemoveMissing, "#{path} has been deleted"
+      when Dropbox::FileMetadata, Dropbox::FolderMetadata
+        res
+      when Array
+        res
       when Hash
         InsensitiveHash[res]
       when String
@@ -120,13 +100,27 @@ module Dbox
       end
     end
 
-    def metadata(path = "/", hash = nil, list=true)
+    def metadata(path = "/")
       run(path) do
         log.debug "Fetching metadata for #{path}"
-        res = @client.metadata(path, 10000, list, hash)
-        log.debug res.inspect
-        raise Dbox::RemoteMissing, "#{path} has been deleted on Dropbox" if res["is_deleted"]
+        begin
+          res = @client.get_metadata(path)#, 10000, list, hash)
+          log.debug res.inspect
+        rescue Dropbox::ApiError => e
+          raise Dbox::RemoteMissing, "#{path} has been deleted on Dropbox" if e.message =~ /path\/not_found/
+        end
         res
+      end
+    end
+
+    def list_folder(path, recursive: false, get_all: true, include_deleted: false)
+      run(path) do
+        log.debug "Getting file listing for #{path}"
+        begin
+          res = @client.list_folder(path, recursive: recursive, get_all: get_all, include_deleted: include_deleted)
+        rescue Dropbox::ApiError => e
+          raise Dbox::RemoteMissing, "#{path} has been deleted on Dropbox" if e.message =~ /path\/not_found/
+        end
       end
     end
 
@@ -134,9 +128,9 @@ module Dbox
       run(path) do
         log.info "Creating #{path}"
         begin
-          @client.file_create_folder(path)
-        rescue DropboxError => e
-          if e.http_response.kind_of?(Net::HTTPForbidden)
+          @client.create_folder(path)
+        rescue Dropbox::ApiError => e
+          if e.message =~ /conflict/
             raise RemoteAlreadyExists, "Either the directory at #{path} already exists, or it has invalid characters in the name"
           else
             raise e
@@ -145,10 +139,16 @@ module Dbox
       end
     end
 
+    def idempotent_delete_dir(path)
+      delete_dir(path)
+    rescue Dropbox::ApiError => e
+      raise e unless e.message =~ /path_lookup\/not_found\//
+    end
+
     def delete_dir(path)
       run(path) do
         log.info "Deleting #{path}"
-        @client.file_delete(path)
+        @client.delete(path)
       end
     end
 
@@ -157,21 +157,25 @@ module Dbox
         # just download directly using the get_file API
         res = run(path) do
           log.info "Downloading #{path}"
-          @client.get_file(path)
+          @client.download(path)
         end
-        if res.kind_of?(String)
-          file_obj << res
+
+        # client.download returns an array with Dropbox::FileMetadata
+        # in the first element
+        # and HTTP::Response::Body in the second
+        if res.kind_of?(Array) && res.last.kind_of?(HTTP::Response::Body)
+          file_obj << res.last.to_s
           true
         else
-          raise DropboxError.new("Invalid response #{res.inspect}")
+          raise Dbox::InvalidResponse
         end
       else
         # use the media API to get a URL that we can stream from, and
         # then stream the file to disk
-        res = run(path) { @client.media(path) }
-        url = res[:url] if res && res.kind_of?(Hash)
+        res = run(path) { @client.get_temporary_link(path) }
+        url = res.last if res.kind_of?(Array) && res.last.respond_to?(:=~) && res.last =~ /^https?:\/\//
         if url
-          log.info "Downloading #{path}"
+          log.info "Streaming #{path}"
           streaming_download(url, file_obj)
         else
           get_file(path, file_obj, false)
@@ -182,14 +186,20 @@ module Dbox
     def put_file(path, local_path, previous_revision=nil)
       run(path) do
         log.info "Uploading #{path}"
-        File.open(local_path, "r") {|f| @client.put_file(path, f, false, previous_revision) }
+        File.open(local_path, "r") {|f| @client.upload(path, f.read, mode: :overwrite) }
       end
+    end
+
+    def idempotent_delete_file(path)
+      delete_file(path)
+    rescue Dropbox::ApiError => e
+      raise e unless e.message =~ /path_lookup\/not_found\//
     end
 
     def delete_file(path)
       run(path) do
         log.info "Deleting #{path}"
-        @client.file_delete(path)
+        @client.delete(path)
       end
     end
 
@@ -197,10 +207,13 @@ module Dbox
       run(old_path) do
         log.info "Moving #{old_path} to #{new_path}"
         begin
-          @client.file_move(old_path, new_path)
-        rescue DropboxError => e
-          if e.http_response.kind_of?(Net::HTTPForbidden)
+          @client.move(old_path, new_path)
+        rescue Dropbox::ApiError => e
+          case e.message
+          when /conflict/
             raise RemoteAlreadyExists, "Error during move -- there may already be a Dropbox folder at #{new_path}"
+          when /not_found/
+            raise RemoteMissing, "Error during move -- the dropbox folder or file you are trying to move does not exist"
           else
             raise e
           end
@@ -216,7 +229,7 @@ module Dbox
       http.ca_file = Dropbox::TRUSTED_CERT_FILE
 
       req = Net::HTTP::Get.new(url.request_uri)
-      req["User-Agent"] = "OfficialDropboxRubySDK/#{Dropbox::SDK_VERSION}"
+      req["User-Agent"] = "dbox"
 
       http.request(req) do |res|
         if res.kind_of?(Net::HTTPSuccess)

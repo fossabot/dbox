@@ -63,6 +63,10 @@ module CaseInsensitiveFile
     File.directory?(resolve(path))
   end
 
+  def self.file?(path)
+    File.file?(resolve(path))
+  end
+
   def self.read(path)
     File.read(resolve(path))
   end
@@ -81,16 +85,16 @@ module CaseInsensitiveFile
 
   def self.rm_rf(path)
     paths = [path].flatten.map { |p| resolve(p)}
-    
+
     FileUtils.rm_rf(paths)
   end
 
   def self.rm_f(path)
     paths = [path].flatten.map { |p| resolve(p)}
-    
-    FileUtils.rm_f(paths)    
+
+    FileUtils.rm_f(paths)
   end
-  
+
   def self.cp(from, to)
     FileUtils.cp(resolve(from), resolve(to))
   end
@@ -101,5 +105,17 @@ module CaseInsensitiveFile
 
   def self.glob(expr)
     Dir.glob(expr, File::FNM_CASEFOLD)
+  end
+
+  def self.basename(path, suffix = nil)
+    if suffix
+      File.basename(resolve(path), suffix)
+    else
+      File.basename(resolve(path))
+    end
+  end
+
+  def self.dirname(path)
+    File.dirname(resolve(path))
   end
 end

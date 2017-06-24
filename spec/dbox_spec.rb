@@ -22,12 +22,12 @@ describe Dbox do
 
   describe '#create' do
     it 'creates the local directory' do
-      expect(Dbox.create(@remote, @local)).to eql(created: [], deleted: [], updated: [''], failed: [])
+      expect(Dbox.create(@remote, @local)).to eql(created: [], deleted: [], updated: [], failed: [], moved: [])
       expect(@local).to exist
     end
 
     it 'creates the remote directory' do
-      expect(Dbox.create(@remote, @local)).to eql(created: [], deleted: [], updated: [''], failed: [])
+      expect(Dbox.create(@remote, @local)).to eql(created: [], deleted: [], updated: [], failed: [], moved: [])
       ensure_remote_exists(@remote)
     end
 
@@ -44,7 +44,7 @@ describe Dbox do
       Dbox.create(@remote, @local)
       rm_rf @local
       expect(@local).to_not exist
-      expect(Dbox.clone(@remote, @local)).to eql(created: [], deleted: [], updated: [''], failed: [])
+      expect(Dbox.clone(@remote, @local)).to eql(created: [], deleted: [], updated: [], failed: [], moved: [])
       expect(@local).to exist
     end
 
@@ -68,7 +68,7 @@ describe Dbox do
 
     it 'should be able to pull' do
       Dbox.create(@remote, @local)
-      expect(Dbox.pull(@local)).to eql(created: [], deleted: [], updated: [], failed: [])
+      expect(Dbox.pull(@local)).to eql(created: [], deleted: [], updated: [], failed: [], moved: [])
     end
 
     it 'should be able to pull changes' do
@@ -78,19 +78,37 @@ describe Dbox do
       @alternate = "#{ALTERNATE_LOCAL_TEST_PATH}/#{@name}"
       Dbox.clone(@remote, @alternate)
       make_file "#{@alternate}/hello.txt"
-      expect(Dbox.push(@alternate)).to eql(created: ['hello.txt'], deleted: [], updated: [], failed: [])
+      expect(Dbox.push(@alternate)).to eql(created: ['hello.txt'], deleted: [], updated: [], failed: [], moved: [])
 
-      expect(Dbox.pull(@local)).to eql(created: ['hello.txt'], deleted: [], updated: [''], failed: [])
+      expect(Dbox.pull(@local)).to eql(created: ['hello.txt'], deleted: [], updated: [], failed: [], moved: [])
       expect("#{@local}/hello.txt").to exist
     end
 
-    it 'should be able to pull after deleting a file and not have the file re-created' do
+    it 'should delete a locally created file that is not on Dropbox' do
       Dbox.create(@remote, @local)
       make_file "#{@local}/hello.txt"
-      expect(Dbox.push(@local)).to eql(created: ['hello.txt'], deleted: [], updated: [], failed: [])
-      rm "#{@local}/hello.txt"
-      expect(Dbox.pull(@local)).to eql(created: [], deleted: [], updated: [''], failed: [])
+      expect(Dbox.pull(@local)).to eql(created: [], deleted: ['hello.txt'], updated: [], failed: [], moved: [])
       expect("#{@local}/hello.txt").to_not exist
+    end
+
+    it 'should overwrite local, unsynced, changes to a file' do
+      Dbox.create(@remote, @local)
+      make_file "#{@local}/hello.txt"
+      content = read_file "#{@local}/hello.txt"
+      Dbox.push(@local)
+      make_file "#{@local}/hello.txt"
+      Dbox.pull(@local)
+      expect("#{@local}/hello.txt").to exist
+      expect(read_file("#{@local}/hello.txt")).to eql content
+    end
+
+    it 'should be able to pull after deleting a file and recreate the file' do
+      Dbox.create(@remote, @local)
+      make_file "#{@local}/hello.txt"
+      expect(Dbox.push(@local)).to eql(created: ['hello.txt'], deleted: [], updated: [], failed: [], moved: [])
+      rm "#{@local}/hello.txt"
+      expect(Dbox.pull(@local)).to eql(created: [], deleted: [], updated: ['hello.txt'], failed: [], moved: [])
+      expect("#{@local}/hello.txt").to exist
     end
 
     it 'should handle a complex set of changes' do
@@ -99,28 +117,28 @@ describe Dbox do
       @alternate = "#{ALTERNATE_LOCAL_TEST_PATH}/#{@name}"
       Dbox.clone(@remote, @alternate)
 
-      expect(Dbox.pull(@local)).to eql(created: [], deleted: [], updated: [], failed: [])
+      expect(Dbox.pull(@local)).to eql(created: [], deleted: [], updated: [], failed: [], moved: [])
 
       make_file "#{@alternate}/foo.txt"
       make_file "#{@alternate}/bar.txt"
       make_file "#{@alternate}/baz.txt"
-      expect(Dbox.push(@alternate)).to eql(created: ['bar.txt', 'baz.txt', 'foo.txt'], deleted: [], updated: [], failed: [])
-      expect(Dbox.pull(@alternate)).to eql(created: [], deleted: [], updated: [''], failed: [])
-      expect(Dbox.pull(@alternate)).to eql(created: [], deleted: [], updated: [], failed: [])
+      expect(Dbox.push(@alternate)).to eql(created: ['bar.txt', 'baz.txt', 'foo.txt'], deleted: [], updated: [], failed: [], moved: [])
+      expect(Dbox.pull(@alternate)).to eql(created: [], deleted: [], updated: [], failed: [], moved: [])
+      expect(Dbox.pull(@alternate)).to eql(created: [], deleted: [], updated: [], failed: [], moved: [])
 
-      expect(Dbox.pull(@local)).to eql(created: ['bar.txt', 'baz.txt', 'foo.txt'], deleted: [], updated: [''], failed: [])
-      expect(Dbox.pull(@local)).to eql(created: [], deleted: [], updated: [], failed: [])
+      expect(Dbox.pull(@local)).to eql(created: ['bar.txt', 'baz.txt', 'foo.txt'], deleted: [], updated: [], failed: [], moved: [])
+      expect(Dbox.pull(@local)).to eql(created: [], deleted: [], updated: [], failed: [], moved: [])
 
       mkdir "#{@alternate}/subdir"
       make_file "#{@alternate}/subdir/one.txt"
       rm "#{@alternate}/foo.txt"
       make_file "#{@alternate}/baz.txt"
-      expect(Dbox.push(@alternate)).to eql(created: ['subdir', 'subdir/one.txt'], deleted: ['foo.txt'], updated: ['baz.txt'], failed: [])
-      expect(Dbox.pull(@alternate)).to eql(created: [], deleted: [], updated: ['', 'subdir'], failed: [])
-      expect(Dbox.pull(@alternate)).to eql(created: [], deleted: [], updated: [], failed: [])
+      expect(Dbox.push(@alternate)).to eql(created: ['subdir', 'subdir/one.txt'], deleted: ['foo.txt'], updated: ['baz.txt'], failed: [], moved: [])
+      expect(Dbox.pull(@alternate)).to eql(created: [], deleted: [], updated: [], failed: [], moved: [])
+      expect(Dbox.pull(@alternate)).to eql(created: [], deleted: [], updated: [], failed: [], moved: [])
 
-      expect(Dbox.pull(@local)).to eql(created: ['subdir', 'subdir/one.txt'], deleted: ['foo.txt'], updated: ['', 'baz.txt'], failed: [])
-      expect(Dbox.pull(@local)).to eql(created: [], deleted: [], updated: [], failed: [])
+      expect(Dbox.pull(@local)).to eql(created: ['subdir/one.txt'], deleted: ['foo.txt'], updated: ['baz.txt'], failed: [], moved: [])
+      expect(Dbox.pull(@local)).to eql(created: [], deleted: [], updated: [], failed: [], moved: [])
     end
 
     it 'should be able to download a bunch of files at the same time' do
@@ -137,7 +155,7 @@ describe Dbox do
 
       res = Dbox.pull(@local)
       expect(res[:deleted]).to eql([])
-      expect(res[:updated]).to eql([''])
+      expect(res[:updated]).to eql([])
       expect(res[:failed]).to eql([])
       expect(res[:created].size).to eql(20)
     end
@@ -149,25 +167,27 @@ describe Dbox do
 
       make_file "#{@local}/hello.txt"
       Dbox.push(@local)
-      expect(Dbox.pull(@alternate)).to eql(created: ['hello.txt'], deleted: [], updated: [''], failed: [])
+      expect(Dbox.pull(@alternate)).to eql(created: ['hello.txt'], deleted: [], updated: [], failed: [], moved: [])
       make_file "#{@local}/hello.txt"
       Dbox.push(@local)
-      expect(Dbox.pull(@alternate)).to eql(created: [], deleted: [], updated: ['', 'hello.txt'], failed: [])
+      expect(Dbox.pull(@alternate)).to eql(created: [], deleted: [], updated: ['hello.txt'], failed: [], moved: [])
       make_file "#{@local}/hello.txt"
       Dbox.push(@local)
-      expect(Dbox.pull(@alternate)).to eql(created: [], deleted: [], updated: ['', 'hello.txt'], failed: [])
+      expect(Dbox.pull(@alternate)).to eql(created: [], deleted: [], updated: ['hello.txt'], failed: [], moved: [])
     end
 
-    it 'should handle conflicting pulls of new files gracefully' do
+    it 'should just overwrite conflicting local changes' do
       Dbox.create(@remote, @local)
       @alternate = "#{ALTERNATE_LOCAL_TEST_PATH}/#{@name}"
       Dbox.clone(@remote, @alternate)
 
       make_file "#{@local}/hello.txt"
+      original_content = File.read("#{@local}/hello.txt")
       Dbox.push(@local)
 
       make_file "#{@alternate}/hello.txt"
-      expect(Dbox.pull(@alternate)).to eql(created: ['hello.txt'], deleted: [], updated: [''], conflicts: [{ original: 'hello.txt', renamed: 'hello (1).txt' }], failed: [])
+      expect(Dbox.pull(@alternate)).to eql(created: ['hello.txt'], deleted: [], updated: [], failed: [], moved: [])
+      expect(read_file("#{@local}/hello.txt")).to eql(original_content)
     end
 
     it 'should handle conflicting pulls of updated files gracefully' do
@@ -176,46 +196,18 @@ describe Dbox do
       Dbox.clone(@remote, @alternate)
 
       make_file "#{@local}/hello.txt"
+
       Dbox.push(@local)
-      expect(Dbox.pull(@alternate)).to eql(created: ['hello.txt'], deleted: [], updated: [''], failed: [])
+      expect(Dbox.pull(@alternate)).to eql(created: ['hello.txt'], deleted: [], updated: [], failed: [], moved: [])
 
       make_file "#{@local}/hello.txt"
+      original_content = File.read("#{@local}/hello.txt")
       Dbox.push(@local)
 
       make_file "#{@alternate}/hello.txt"
-      expect(Dbox.pull(@alternate)).to eql(created: [], deleted: [], updated: ['', 'hello.txt'], conflicts: [{ original: 'hello.txt', renamed: 'hello (1).txt' }], failed: [])
-    end
+      expect(Dbox.pull(@alternate)).to eql(created: [], deleted: [], updated: ['hello.txt'], failed: [], moved: [])
 
-    it 'should deal with all sorts of weird filenames when renaming due to conflicts on pull' do
-      Dbox.create(@remote, @local)
-      @alternate = "#{ALTERNATE_LOCAL_TEST_PATH}/#{@name}"
-      Dbox.clone(@remote, @alternate)
-
-      make_file "#{@local}/hello.txt"
-      make_file "#{@local}/hello (1).txt"
-      make_file "#{@local}/goodbye.txt"
-      Dbox.push(@local)
-
-      make_file "#{@alternate}/hello.txt"
-      make_file "#{@alternate}/hello (1).txt"
-      make_file "#{@alternate}/hello (3).txt"
-      make_file "#{@alternate}/hello (4).txt"
-      make_file "#{@alternate}/hello (test).txt"
-      make_file "#{@alternate}/goodbye.txt"
-      make_file "#{@alternate}/goodbye (1).txt"
-      make_file "#{@alternate}/goodbye (2).txt"
-      make_file "#{@alternate}/goodbye (3).txt"
-      make_file "#{@alternate}/goodbye ().txt"
-
-      # there's a race condition, so the output could be one of two things
-      res = Dbox.pull(@alternate)
-      expect(res[:created]).to eql(['goodbye.txt', 'hello (1).txt', 'hello.txt'])
-      expect(res[:updated]).to eql([''])
-      expect(res[:deleted]).to eql([])
-      expect(res[:failed]).to eql([])
-      c = (res[:conflicts] == [{ original: 'goodbye.txt', renamed: 'goodbye (4).txt' }, { original: 'hello (1).txt', renamed: 'hello (5).txt' }, { original: 'hello.txt', renamed: 'hello (2).txt' }]) ||
-          (res[:conflicts] == [{ original: 'goodbye.txt', renamed: 'goodbye (4).txt' }, { original: 'hello (1).txt', renamed: 'hello (2).txt' }, { original: 'hello.txt', renamed: 'hello (5).txt' }])
-      expect(c).to be true
+      expect(read_file("#{@local}/hello.txt")).to eql(original_content)
     end
 
     context 'with a single-level subdirectory specified' do
@@ -373,7 +365,7 @@ describe Dbox do
       Dbox.create(@remote, @local)
       rm_rf @local
       expect(@local).to_not exist
-      expect(Dbox.clone_or_pull(@remote, @local)).to eql(created: [], deleted: [], updated: [''], failed: [])
+      expect(Dbox.clone_or_pull(@remote, @local)).to eql(created: [], deleted: [], updated: [], failed: [], moved: [])
       expect(@local).to exist
     end
 
@@ -385,7 +377,7 @@ describe Dbox do
     it 'shold be able to pull changes on existing repo' do
       Dbox.create(@remote, @local)
       expect(@local).to exist
-      expect(Dbox.clone_or_pull(@remote, @local)).to eql(created: [], deleted: [], updated: [], failed: [])
+      expect(Dbox.clone_or_pull(@remote, @local)).to eql(created: [], deleted: [], updated: [], failed: [], moved: [])
       expect(@local).to exist
     end
   end
@@ -397,26 +389,26 @@ describe Dbox do
 
     it 'should be able to push' do
       Dbox.create(@remote, @local)
-      expect(Dbox.push(@local)).to eql(created: [], deleted: [], updated: [], failed: [])
+      expect(Dbox.push(@local)).to eql(created: [], deleted: [], updated: [], failed: [], moved: [])
     end
 
     it 'should be able to push a new file' do
       Dbox.create(@remote, @local)
       make_file "#{@local}/foo.txt"
-      expect(Dbox.push(@local)).to eql(created: ['foo.txt'], deleted: [], updated: [], failed: [])
+      expect(Dbox.push(@local)).to eql(created: ['foo.txt'], deleted: [], updated: [], failed: [], moved: [])
     end
 
     it 'should be able to push a new dir' do
       Dbox.create(@remote, @local)
       mkdir "#{@local}/subdir"
-      expect(Dbox.push(@local)).to eql(created: ['subdir'], deleted: [], updated: [], failed: [])
+      expect(Dbox.push(@local)).to eql(created: ['subdir'], deleted: [], updated: [], failed: [], moved: [])
     end
 
     it 'should be able to push a new dir with a file in it' do
       Dbox.create(@remote, @local)
       mkdir "#{@local}/subdir"
       make_file "#{@local}/subdir/foo.txt"
-      expect(Dbox.push(@local)).to eql(created: ['subdir', 'subdir/foo.txt'], deleted: [], updated: [], failed: [])
+      expect(Dbox.push(@local)).to eql(created: ['subdir', 'subdir/foo.txt'], deleted: [], updated: [], failed: [], moved: [])
     end
 
     it 'should be able to push a new file in an existing dir' do
@@ -424,41 +416,41 @@ describe Dbox do
       mkdir "#{@local}/subdir"
       Dbox.push(@local)
       make_file "#{@local}/subdir/foo.txt"
-      expect(Dbox.push(@local)).to eql(created: ['subdir/foo.txt'], deleted: [], updated: [], failed: [])
+      expect(Dbox.push(@local)).to eql(created: ['subdir/foo.txt'], deleted: [], updated: [], failed: [], moved: [])
     end
 
-    it 'should create the remote dir if it is missing' do
+    it 'should fail if the remote is missing' do
       Dbox.create(@remote, @local)
       make_file "#{@local}/foo.txt"
       @new_name = randname
       @new_remote = File.join(REMOTE_TEST_PATH, @new_name)
       db = Dbox::Database.load(@local)
       db.update_metadata(remote_path: @new_remote)
-      expect(Dbox.push(@local)).to eql(created: ['foo.txt'], deleted: [], updated: [], failed: [])
+      expect { Dbox.push(@local) }.to raise_error(Dbox::RemoteMissing)
     end
 
     it 'should not re-download the file after creating' do
       Dbox.create(@remote, @local)
       make_file "#{@local}/foo.txt"
-      expect(Dbox.push(@local)).to eql(created: ['foo.txt'], deleted: [], updated: [], failed: [])
-      expect(Dbox.pull(@local)).to eql(created: [], deleted: [], updated: [''], failed: [])
+      expect(Dbox.push(@local)).to eql(created: ['foo.txt'], deleted: [], updated: [], failed: [], moved: [])
+      expect(Dbox.pull(@local)).to eql(created: [], deleted: [], updated: [], failed: [], moved: [])
     end
 
     it 'should not re-download the file after updating' do
       Dbox.create(@remote, @local)
       make_file "#{@local}/foo.txt"
-      expect(Dbox.push(@local)).to eql(created: ['foo.txt'], deleted: [], updated: [], failed: [])
+      expect(Dbox.push(@local)).to eql(created: ['foo.txt'], deleted: [], updated: [], failed: [], moved: [])
       sleep 1 # need to wait for timestamp to change before writing same file
       make_file "#{@local}/foo.txt"
-      expect(Dbox.push(@local)).to eql(created: [], deleted: [], updated: ['foo.txt'], failed: [])
-      expect(Dbox.pull(@local)).to eql(created: [], deleted: [], updated: [''], failed: [])
+      expect(Dbox.push(@local)).to eql(created: [], deleted: [], updated: ['foo.txt'], failed: [], moved: [])
+      expect(Dbox.pull(@local)).to eql(created: [], deleted: [], updated: [], failed: [], moved: [])
     end
 
     it 'should not re-download the dir after creating' do
       Dbox.create(@remote, @local)
       mkdir "#{@local}/subdir"
-      expect(Dbox.push(@local)).to eql(created: ['subdir'], deleted: [], updated: [], failed: [])
-      expect(Dbox.pull(@local)).to eql(created: [], deleted: [], updated: [''], failed: [])
+      expect(Dbox.push(@local)).to eql(created: ['subdir'], deleted: [], updated: [], failed: [], moved: [])
+      expect(Dbox.pull(@local)).to eql(created: [], deleted: [], updated: [], failed: [], moved: [])
     end
 
     it 'should handle a complex set of changes' do
@@ -466,14 +458,14 @@ describe Dbox do
       make_file "#{@local}/foo.txt"
       make_file "#{@local}/bar.txt"
       make_file "#{@local}/baz.txt"
-      expect(Dbox.push(@local)).to eql(created: ['bar.txt', 'baz.txt', 'foo.txt'], deleted: [], updated: [], failed: [])
+      expect(Dbox.push(@local)).to eql(created: ['bar.txt', 'baz.txt', 'foo.txt'], deleted: [], updated: [], failed: [], moved: [])
       sleep 1 # need to wait for timestamp to change before writing same file
       mkdir "#{@local}/subdir"
       make_file "#{@local}/subdir/one.txt"
       rm "#{@local}/foo.txt"
       make_file "#{@local}/baz.txt"
-      expect(Dbox.push(@local)).to eql(created: ['subdir', 'subdir/one.txt'], deleted: ['foo.txt'], updated: ['baz.txt'], failed: [])
-      expect(Dbox.pull(@local)).to eql(created: [], deleted: [], updated: ['', 'subdir'], failed: [])
+      expect(Dbox.push(@local)).to eql(created: ['subdir', 'subdir/one.txt'], deleted: ['foo.txt'], updated: ['baz.txt'], failed: [], moved: [])
+      expect(Dbox.pull(@local)).to eql(created: [], deleted: [], updated: [], failed: [], moved: [])
     end
 
     it 'should be able to handle crazy filenames' do
@@ -482,9 +474,9 @@ describe Dbox do
       crazy_name2 = '[ˈdɔʏtʃ].txt'
       make_file "#{@local}/#{crazy_name1}"
       make_file "#{@local}/#{crazy_name2}"
-      expect(Dbox.push(@local)).to eql(created: [crazy_name1, crazy_name2], deleted: [], updated: [], failed: [])
+      expect(Dbox.push(@local)).to eql(created: [crazy_name1, crazy_name2], deleted: [], updated: [], failed: [], moved: [])
       rm_rf @local
-      expect(Dbox.clone(@remote, @local)).to eql(created: [crazy_name1, crazy_name2], deleted: [], updated: [''], failed: [])
+      expect(Dbox.clone(@remote, @local)).to eql(created: [crazy_name1, crazy_name2], deleted: [], updated: [], failed: [], moved: [])
     end
 
     it 'should be able to handle crazy directory names' do
@@ -492,9 +484,9 @@ describe Dbox do
       crazy_name1 = 'Day[J] #42'
       mkdir File.join(@local, crazy_name1)
       make_file File.join(@local, crazy_name1, 'foo.txt')
-      expect(Dbox.push(@local)).to eql(created: [crazy_name1, File.join(crazy_name1, 'foo.txt')], deleted: [], updated: [], failed: [])
+      expect(Dbox.push(@local)).to eql(created: [crazy_name1, File.join(crazy_name1, 'foo.txt')], deleted: [], updated: [], failed: [], moved: [])
       rm_rf @local
-      expect(Dbox.clone(@remote, @local)).to eql(created: [crazy_name1, File.join(crazy_name1, 'foo.txt')], deleted: [], updated: [''], failed: [])
+      expect(Dbox.clone(@remote, @local)).to eql(created: [File.join(crazy_name1, 'foo.txt')], deleted: [], updated: [], failed: [], moved: [])
     end
 
     it 'should be able to upload a bunch of files at the same time' do
@@ -516,11 +508,11 @@ describe Dbox do
       Dbox.create(@remote, @local)
 
       make_file "#{@local}/hello.txt"
-      expect(Dbox.push(@local)).to eql(created: ['hello.txt'], deleted: [], updated: [], failed: [])
+      expect(Dbox.push(@local)).to eql(created: ['hello.txt'], deleted: [], updated: [], failed: [], moved: [])
       make_file "#{@local}/hello.txt"
-      expect(Dbox.push(@local)).to eql(created: [], deleted: [], updated: ['hello.txt'], failed: [])
+      expect(Dbox.push(@local)).to eql(created: [], deleted: [], updated: ['hello.txt'], failed: [], moved: [])
       make_file "#{@local}/hello.txt"
-      expect(Dbox.push(@local)).to eql(created: [], deleted: [], updated: ['hello.txt'], failed: [])
+      expect(Dbox.push(@local)).to eql(created: [], deleted: [], updated: ['hello.txt'], failed: [], moved: [])
     end
 
     it 'should handle conflicting pushes of new files gracefully' do
@@ -530,10 +522,10 @@ describe Dbox do
       Dbox.clone(@remote, @alternate)
 
       make_file "#{@local}/hello.txt"
-      expect(Dbox.push(@local)).to eql(created: ['hello.txt'], deleted: [], updated: [], failed: [])
+      expect(Dbox.push(@local)).to eql(created: ['hello.txt'], deleted: [], updated: [], failed: [], moved: [])
 
       make_file "#{@alternate}/hello.txt"
-      expect(Dbox.push(@alternate)).to eql(created: [], deleted: [], updated: [], conflicts: [{ original: 'hello.txt', renamed: 'hello (1).txt' }], failed: [])
+      expect(Dbox.push(@alternate)).to eql(created: [], deleted: [], updated: ['hello.txt'], failed: [], moved: [])
     end
 
     it 'should handle conflicting pushes of updated files gracefully' do
@@ -545,17 +537,14 @@ describe Dbox do
       Dbox.clone(@remote, @alternate)
 
       make_file "#{@local}/hello.txt"
-      expect(Dbox.push(@local)).to eql(created: [], deleted: [], updated: ['hello.txt'], failed: [])
+      expect(Dbox.push(@local)).to eql(created: [], deleted: [], updated: ['hello.txt'], failed: [], moved: [])
 
       make_file "#{@alternate}/hello.txt"
       res = Dbox.push(@alternate)
       expect(res[:created]).to eql([])
-      expect(res[:updated]).to eql([])
+      expect(res[:updated]).to eql(['hello.txt'])
       expect(res[:deleted]).to eql([])
       expect(res[:failed]).to eql([])
-      expect(res[:conflicts].size).to eql(1)
-      expect(res[:conflicts][0][:original]).to eql('hello.txt')
-      expect(res[:conflicts][0][:renamed]).to match(/hello \(.* conflicted copy\).txt/)
     end
 
     context 'with a single-level subdirectory specified' do
@@ -681,187 +670,6 @@ describe Dbox do
     end
   end
 
-  describe '#sync' do
-    it 'should fail if the local dir is missing' do
-      expect { Dbox.sync(@local) }.to raise_error(Dbox::DatabaseError)
-    end
-
-    it 'should be able to sync basic changes' do
-      Dbox.create(@remote, @local)
-      @alternate = "#{ALTERNATE_LOCAL_TEST_PATH}/#{@name}"
-      Dbox.clone(@remote, @alternate)
-
-      expect(Dbox.sync(@local)).to eql(pull: { created: [], deleted: [], updated: [], failed: [] },
-                                       push: { created: [], deleted: [], updated: [], failed: [] })
-      expect(Dbox.sync(@alternate)).to eql(pull: { created: [], deleted: [], updated: [], failed: [] },
-                                           push: { created: [], deleted: [], updated: [], failed: [] })
-
-      make_file "#{@local}/hello.txt"
-      expect(Dbox.sync(@local)).to eql(pull: { created: [], deleted: [], updated: [], failed: [] },
-                                       push: { created: ['hello.txt'], deleted: [], updated: [], failed: [] })
-      expect(Dbox.sync(@alternate)).to eql(pull: { created: ['hello.txt'], deleted: [], updated: [''], failed: [] },
-                                           push: { created: [], deleted: [], updated: [], failed: [] })
-    end
-
-    it 'should be able to sync complex changes' do
-      Dbox.create(@remote, @local)
-      @alternate = "#{ALTERNATE_LOCAL_TEST_PATH}/#{@name}"
-      Dbox.clone(@remote, @alternate)
-
-      expect(Dbox.sync(@local)).to eql(pull: { created: [], deleted: [], updated: [], failed: [] },
-                                       push: { created: [], deleted: [], updated: [], failed: [] })
-      expect(Dbox.sync(@alternate)).to eql(pull: { created: [], deleted: [], updated: [], failed: [] },
-                                           push: { created: [], deleted: [], updated: [], failed: [] })
-
-      make_file "#{@local}/hello.txt"
-      make_file "#{@local}/goodbye.txt"
-      make_file "#{@local}/so_long.txt"
-      make_file "#{@alternate}/hello.txt"
-      make_file "#{@alternate}/farewell.txt"
-      expect(Dbox.sync(@local)).to eql(pull: { created: [], deleted: [], updated: [], failed: [] },
-                                       push: { created: ['goodbye.txt', 'hello.txt', 'so_long.txt'], deleted: [], updated: [], failed: [] })
-      expect(Dbox.sync(@alternate)).to eql(pull: { created: ['goodbye.txt', 'hello.txt', 'so_long.txt'], deleted: [], updated: [''], failed: [], conflicts: [{ renamed: 'hello (1).txt', original: 'hello.txt' }] },
-                                           push: { created: ['farewell.txt', 'hello (1).txt'], deleted: [], updated: [], failed: [] })
-
-      make_file "#{@alternate}/farewell.txt"
-      make_file "#{@alternate}/goodbye.txt"
-      make_file "#{@alternate}/au_revoir.txt"
-      expect(Dbox.sync(@alternate)).to eql(pull: { created: [], deleted: [], updated: [''], failed: [] },
-                                           push: { created: ['au_revoir.txt'], deleted: [], updated: ['farewell.txt', 'goodbye.txt'], failed: [] })
-      expect(Dbox.sync(@local)).to eql(pull: { created: ['au_revoir.txt', 'farewell.txt', 'hello (1).txt'], deleted: [], updated: ['', 'goodbye.txt'], failed: [] },
-                                       push: { created: [], deleted: [], updated: [], failed: [] })
-    end
-
-    it 'should be able to handle a file that has changed case' do
-      Dbox.create(@remote, @local)
-      make_file "#{@local}/hello.txt"
-      expect(Dbox.sync(@local)).to eql(pull: { created: [], deleted: [], updated: [], failed: [] },
-                                       push: { created: ['hello.txt'], deleted: [], updated: [], failed: [] })
-      rename_file "#{@local}/hello.txt", "#{@local}/HELLO.txt"
-      expect(Dbox.sync(@local)).to eql(pull: { created: [], deleted: [], updated: [''], failed: [] },
-                                       push: { created: [], deleted: [], updated: [], failed: [] })
-    end
-
-    it 'should be able to handle a file that has changed case remotely' do
-      Dbox.create(@remote, @local)
-      @alternate = "#{ALTERNATE_LOCAL_TEST_PATH}/#{@name}"
-      Dbox.clone(@remote, @alternate)
-      make_file "#{@local}/hello.txt"
-      expect(Dbox.sync(@local)).to eql(pull: { created: [], deleted: [], updated: [], failed: [] },
-                                       push: { created: ['hello.txt'], deleted: [], updated: [], failed: [] })
-      expect(Dbox.sync(@alternate)).to eql(pull: { created: ['hello.txt'], deleted: [], updated: [''], failed: [] },
-                                           push: { created: [], deleted: [], updated: [], failed: [] })
-      rename_file "#{@local}/hello.txt", "#{@local}/HELLO.txt"
-      expect(Dbox.sync(@local)).to eql(pull: { created: [], deleted: [], updated: [''], failed: [] },
-                                       push: { created: [], deleted: [], updated: [], failed: [] })
-      expect(Dbox.sync(@alternate)).to eql(pull: { created: [], deleted: [], updated: [], failed: [] },
-                                           push: { created: [], deleted: [], updated: [], failed: [] })
-    end
-
-    it 'should be able to handle a folder that has changed case' do
-      Dbox.create(@remote, @local)
-      mkdir "#{@local}/foo"
-      make_file "#{@local}/foo/hello.txt"
-      expect(Dbox.sync(@local)).to eql(pull: { created: [], deleted: [], updated: [], failed: [] },
-                                       push: { created: ['foo', 'foo/hello.txt'], deleted: [], updated: [], failed: [] })
-      rename_file "#{@local}/foo", "#{@local}/FOO"
-      expect(Dbox.sync(@local)).to eql(pull: { created: [], deleted: [], updated: ['', 'foo'], failed: [] },
-                                       push: { created: [], deleted: [], updated: [], failed: [] })
-      make_file "#{@local}/FOO/hello2.txt"
-      expect(Dbox.sync(@local)).to eql(pull: { created: [], deleted: [], updated: [], failed: [] },
-                                       push: { created: ['FOO/hello2.txt'], deleted: [], updated: [], failed: [] })
-    end
-
-    it 'should be able to handle a folder that has changed case remotely' do
-      Dbox.create(@remote, @local)
-      @alternate = "#{ALTERNATE_LOCAL_TEST_PATH}/#{@name}"
-      Dbox.clone(@remote, @alternate)
-      mkdir "#{@local}/foo"
-      make_file "#{@local}/foo/hello.txt"
-      expect(Dbox.sync(@local)).to eql(pull: { created: [], deleted: [], updated: [], failed: [] },
-                                       push: { created: ['foo', 'foo/hello.txt'], deleted: [], updated: [], failed: [] })
-      expect(Dbox.sync(@alternate)).to eql(pull: { created: ['foo', 'foo/hello.txt'], deleted: [], updated: [''], failed: [] },
-                                           push: { created: [], deleted: [], updated: [], failed: [] })
-      rename_file "#{@local}/foo", "#{@local}/FOO"
-      make_file "#{@local}/FOO/hello2.txt"
-      make_file "#{@alternate}/foo/hello3.txt"
-      expect(Dbox.sync(@local)).to eql(pull: { created: [], deleted: [], updated: ['', 'foo'], failed: [] },
-                                       push: { created: ['FOO/hello2.txt'], deleted: [], updated: [], failed: [] })
-      expect(Dbox.sync(@alternate)).to eql(pull: { created: ['foo/hello2.txt'], deleted: [], updated: ['foo'], failed: [] },
-                                           push: { created: ['foo/hello3.txt'], deleted: [], updated: [], failed: [] })
-      expect(Dbox.sync(@local)).to eql(pull: { created: ['foo/hello3.txt'], deleted: [], updated: ['foo'], failed: [] },
-                                       push: { created: [], deleted: [], updated: [], failed: [] })
-    end
-
-    it 'should be able to handle creating a new file of a different case from a deleted file' do
-      Dbox.create(@remote, @local)
-      mkdir "#{@local}/foo"
-      make_file "#{@local}/foo/hello.txt"
-      expect(Dbox.sync(@local)).to eql(pull: { created: [], deleted: [], updated: [], failed: [] },
-                                       push: { created: ['foo', 'foo/hello.txt'], deleted: [], updated: [], failed: [] })
-      rm_rf "#{@local}/foo"
-      expect(Dbox.sync(@local)).to eql(pull: { created: [], deleted: [], updated: ['', 'foo'], failed: [] },
-                                       push: { created: [], deleted: ['foo/hello.txt'], updated: [], failed: [] })
-      rm_rf "#{@local}/foo"
-      mkdir "#{@local}/FOO"
-      make_file "#{@local}/FOO/HELLO.txt"
-      expect(Dbox.sync(@local)).to eql(pull: { created: [], deleted: [], updated: ['foo'], failed: [] },
-                                       push: { created: ['FOO/HELLO.txt'], deleted: [], updated: [], failed: [] })
-      expect(Dbox.sync(@local)).to eql(pull: { created: [], deleted: [], updated: ['foo'], failed: [] },
-                                       push: { created: [], deleted: [], updated: [], failed: [] })
-    end
-
-    it 'should be able to handle creating a new file of a different case from a deleted file remotely' do
-      Dbox.create(@remote, @local)
-      @alternate = "#{ALTERNATE_LOCAL_TEST_PATH}/#{@name}"
-      Dbox.clone(@remote, @alternate)
-
-      mkdir "#{@local}/foo"
-      make_file "#{@local}/foo/hello.txt"
-      expect(Dbox.sync(@local)).to eql(pull: { created: [], deleted: [], updated: [], failed: [] },
-                                       push: { created: ['foo', 'foo/hello.txt'], deleted: [], updated: [], failed: [] })
-      expect(Dbox.sync(@alternate)).to eql(pull: { created: ['foo', 'foo/hello.txt'], deleted: [], updated: [''], failed: [] },
-                                           push: { created: [], deleted: [], updated: [], failed: [] })
-      rm_rf "#{@alternate}/foo"
-      expect(Dbox.sync(@alternate)).to eql(pull: { created: [], deleted: [], updated: [], failed: [] },
-                                           push: { created: [], deleted: ['foo'], updated: [], failed: [] })
-      mkdir "#{@alternate}/FOO"
-      make_file "#{@alternate}/FOO/HELLO.txt"
-      make_file "#{@alternate}/FOO/HELLO2.txt"
-      expect(Dbox.sync(@alternate)).to eql(pull: { created: [], deleted: [], updated: [''], failed: [] },
-                                           push: { created: ['FOO', 'FOO/HELLO.txt', 'FOO/HELLO2.txt'], deleted: [], updated: [], failed: [] })
-
-      rename_file "#{@alternate}/FOO", "#{@alternate}/Foo"
-      make_file "#{@alternate}/Foo/Hello3.txt"
-      expect(Dbox.sync(@alternate)).to eql(pull: { created: [], deleted: [], updated: ['', 'FOO'], failed: [] },
-                                           push: { created: ['Foo/Hello3.txt'], deleted: [], updated: [], failed: [] })
-
-      expect(Dbox.sync(@local)).to eql(pull: { created: ['foo/HELLO2.txt', 'foo/Hello3.txt'], deleted: [], updated: ['', 'FOO', 'foo/HELLO.txt'], failed: [] },
-                                       push: { created: [], deleted: [], updated: [], failed: [] })
-    end
-
-    it 'should be able to handle nested directories with case changes' do
-      Dbox.create(@remote, @local)
-      @alternate = "#{ALTERNATE_LOCAL_TEST_PATH}/#{@name}"
-      Dbox.clone(@remote, @alternate)
-
-      mkdir "#{@local}/foo"
-      make_file "#{@local}/foo/hello.txt"
-      expect(Dbox.sync(@local)).to eql(pull: { created: [], deleted: [], updated: [], failed: [] },
-                                       push: { created: ['foo', 'foo/hello.txt'], deleted: [], updated: [], failed: [] })
-      expect(Dbox.sync(@alternate)).to eql(pull: { created: ['foo', 'foo/hello.txt'], deleted: [], updated: [''], failed: [] },
-                                           push: { created: [], deleted: [], updated: [], failed: [] })
-
-      rename_file "#{@local}/foo", "#{@local}/FOO"
-      mkdir "#{@local}/FOO/BAR"
-      make_file "#{@local}/FOO/BAR/hello2.txt"
-      expect(Dbox.sync(@local)).to eql(pull: { created: [], deleted: [], updated: ['', 'foo'], failed: [] },
-                                       push: { created: ['FOO/BAR', 'FOO/BAR/hello2.txt'], deleted: [], updated: [], failed: [] })
-      expect(Dbox.sync(@alternate)).to eql(pull: { created: ['FOO/BAR/hello2.txt', 'foo/BAR'], deleted: [], updated: ['foo'], failed: [] },
-                                           push: { created: [], deleted: [], updated: [], failed: [] })
-    end
-  end
-
   describe '#move' do
     before(:each) do
       @new_name = randname
@@ -912,25 +720,25 @@ describe Dbox do
       @alternate = "#{ALTERNATE_LOCAL_TEST_PATH}/#{@name}"
       Dbox.clone(@remote, @alternate)
 
-      expect(Dbox.pull(@local)).to eql(created: [], deleted: [], updated: [], failed: [])
+      expect(Dbox.pull(@local)).to eql(created: [], deleted: [], updated: [], failed: [], moved: [])
 
       mkdir "#{@local}/subdir"
       make_file "#{@local}/subdir/one.txt"
-      expect(Dbox.push(@local)).to eql(created: ['subdir', 'subdir/one.txt'], deleted: [], updated: [], failed: [])
+      expect(Dbox.push(@local)).to eql(created: ['subdir', 'subdir/one.txt'], deleted: [], updated: [], failed: [], moved: [])
 
-      expect(Dbox.pull(@alternate)).to eql(created: ['subdir', 'subdir/one.txt'], deleted: [], updated: [''], failed: [])
+      expect(Dbox.pull(@alternate)).to eql(created: ['subdir/one.txt'], deleted: [], updated: [], failed: [], moved: [])
 
       rm_rf "#{@alternate}/subdir"
-      expect(Dbox.push(@alternate)).to eql(created: [], deleted: ['subdir'], updated: [], failed: [])
+      expect(Dbox.push(@alternate)).to eql(created: [], deleted: ['subdir', 'subdir/one.txt'], updated: [], failed: [], moved: [])
 
-      expect(Dbox.pull(@local)).to eql(created: [], deleted: ['subdir'], updated: [''], failed: [])
+      expect(Dbox.pull(@local)).to eql(created: [], deleted: ['subdir', 'subdir/one.txt'], updated: [], failed: [], moved: [])
 
       sleep 1 # need to wait for timestamp to change before writing same file
       mkdir "#{@local}/subdir"
       make_file "#{@local}/subdir/one.txt"
-      expect(Dbox.push(@local)).to eql(created: ['subdir', 'subdir/one.txt'], deleted: [], updated: [], failed: [])
+      expect(Dbox.push(@local)).to eql(created: ['subdir', 'subdir/one.txt'], deleted: [], updated: [], failed: [], moved: [])
 
-      expect(Dbox.pull(@alternate)).to eql(created: ['subdir', 'subdir/one.txt'], deleted: [], updated: [''], failed: [])
+      expect(Dbox.pull(@alternate)).to eql(created: ['subdir/one.txt'], deleted: [], updated: [], failed: [], moved: [])
     end
   end
 
@@ -1008,6 +816,7 @@ describe Dbox do
         Dbox.push(@alternate, subdir: 'dir2')
 
         # Make more changes in Dropbox
+        Dbox.pull(@local)
         make_file "#{@local}/dir1/from_local.txt"
         FileUtils.rm("#{@local}/dir1/hello.txt")
         Dbox.push(@local)

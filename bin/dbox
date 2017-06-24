@@ -26,8 +26,9 @@ EOS
   end
 
   desc 'create <remote_path> [<local_path>]', 'Create a new folder on Dropbox'
+  option :noclobber, type: :boolean
   def create(remote_path, local_path = nil)
-    Dbox.create(remote_path, local_path)
+    Dbox.create(remote_path, local_path, options)
   end
 
   desc 'list <remote_path>', 'List files and directories in Dropbox folder'
@@ -37,26 +38,24 @@ EOS
 
   desc 'clone <remote_path> [<local_path>]', 'Clone an existing Dropbox folder'
   option :subdir
+  option :noclobber, type: :boolean
   def clone(remote_path, local_path = nil)
     Dbox.clone(remote_path, local_path, options)
   end
 
   desc 'pull [<local_path>]', 'Pull changes from Dropbox'
   option :subdir
+  option :blacklisted_extensions
+  option :noclobber, type: :boolean
   def pull(local_path = '.')
     Dbox.pull(local_path, options)
   end
 
   desc 'push [<local_path>]', 'Push changes to Dropbox'
   option :subdir
+  option :blacklisted_extensions
   def push(local_path = '.')
     Dbox.push(local_path, options)
-  end
-
-  desc 'sync [<local_path>]', 'Sync changes to Dropbox'
-  option :subdir
-  def sync(local_path = '.')
-    Dbox.sync(local_path, options)
   end
 
   desc 'move <new_remote_path> [<local_path>]', 'Move the remote Dropbox folder to a new location'
