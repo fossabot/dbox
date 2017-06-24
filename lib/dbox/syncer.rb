@@ -468,7 +468,7 @@ module Dbox
             if c.is_a?(Dropbox::FolderMetadata)
               api.delete_dir(c.path_lower)
             else
-              api.delete_file(c.path_lower)
+              api.idempotent_delete_file(c.path_lower)
             end
             changelist[:deleted] << remote_to_relative_path(c.path_lower)
           rescue Dbox::RemoteMissing

@@ -726,19 +726,19 @@ describe Dbox do
       make_file "#{@local}/subdir/one.txt"
       expect(Dbox.push(@local)).to eql(created: ['subdir', 'subdir/one.txt'], deleted: [], updated: [], failed: [], moved: [])
 
-      expect(Dbox.pull(@alternate)).to eql(created: ['subdir', 'subdir/one.txt'], deleted: [], updated: [], failed: [], moved: [])
+      expect(Dbox.pull(@alternate)).to eql(created: ['subdir/one.txt'], deleted: [], updated: [], failed: [], moved: [])
 
       rm_rf "#{@alternate}/subdir"
-      expect(Dbox.push(@alternate)).to eql(created: [], deleted: ['subdir'], updated: [], failed: [], moved: [])
+      expect(Dbox.push(@alternate)).to eql(created: [], deleted: ['subdir', 'subdir/one.txt'], updated: [], failed: [], moved: [])
 
-      expect(Dbox.pull(@local)).to eql(created: [], deleted: ['subdir'], updated: [], failed: [], moved: [])
+      expect(Dbox.pull(@local)).to eql(created: [], deleted: ['subdir', 'subdir/one.txt'], updated: [], failed: [], moved: [])
 
       sleep 1 # need to wait for timestamp to change before writing same file
       mkdir "#{@local}/subdir"
       make_file "#{@local}/subdir/one.txt"
       expect(Dbox.push(@local)).to eql(created: ['subdir', 'subdir/one.txt'], deleted: [], updated: [], failed: [], moved: [])
 
-      expect(Dbox.pull(@alternate)).to eql(created: ['subdir', 'subdir/one.txt'], deleted: [], updated: [], failed: [], moved: [])
+      expect(Dbox.pull(@alternate)).to eql(created: ['subdir/one.txt'], deleted: [], updated: [], failed: [], moved: [])
     end
   end
 
