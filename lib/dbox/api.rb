@@ -159,7 +159,16 @@ module Dbox
         # just download directly using the get_file API
         res = run(path) do
           log.info "Downloading #{path}"
+          begin
           @client.download(path)
+          rescue Dropbox::ApiError => e
+            if e.message =~ /path\/restricted_content\//
+              puts "#{path} raised a restricted_content error. Skipping"
+              return
+            else
+              raise e
+            end
+          end
         end
 
         # client.download returns an array with Dropbox::FileMetadata
