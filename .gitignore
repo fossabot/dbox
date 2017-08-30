@@ -3,6 +3,7 @@ Gemfile.lock
 pkg
 tmp
 tags
+.ruby-version
 .DS_Store
 *~
 \#*
