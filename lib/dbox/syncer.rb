@@ -90,8 +90,22 @@ module Dbox
         params[:blacklisted_extensions].split(/,/).map(&:downcase)
       end
 
+      def blacklisted_directories
+        return ['.git', '.svn'] unless params[:blacklisted_directories]
+        params[:blacklisted_directories].split(/,/).map(&:downcase)
+      end
+
       def remove_dotfiles(files)
         files.reject {|f| File.basename(f.path_lower).start_with?(".") }
+      end
+
+      def remove_blacklisted_directories(files)
+        return files unless blacklisted_directories
+        files.reject do |f|
+          Pathname(f.path_lower).each_filename.to_a.any? do |d|
+            blacklisted_directories.include?(d)
+          end
+        end
       end
 
       def remove_blacklisted_extensions(files)
@@ -171,6 +185,7 @@ module Dbox
         if res.is_a?(Array) && res.all? {|r| r.is_a?(Dropbox::FileMetadata) || r.is_a?(Dropbox::FolderMetadata)}
           res = remove_dotfiles(res)
           res = remove_blacklisted_extensions(res)
+          res = remove_blacklisted_directories(res)
           res
         else
           raise(RuntimeError, "Invalid result from server: #{res.inspect}")
