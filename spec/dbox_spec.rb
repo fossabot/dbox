@@ -759,6 +759,35 @@ describe Dbox do
     end
   end
 
+  describe 'pushing with a subdir specified' do
+    it 'should not blow away the db for the other subdirs' do
+      Dbox.create(@remote, @local)
+      @alternate = "#{ALTERNATE_LOCAL_TEST_PATH}/#{@name}"
+      Dbox.clone(@remote, @alternate)
+
+      # Make some files and pull them from Dropbox
+      FileUtils.mkdir_p(File.join(@local, 'dir1/dir1a'))
+      FileUtils.mkdir_p(File.join(@local, 'dir2/dir2a'))
+      make_file "#{@local}/dir1/hello.txt"
+      make_file "#{@local}/dir1/dir1a/hello.txt"
+      make_file "#{@local}/dir2/goodbye.txt"
+      make_file "#{@local}/dir2/dir2a/goodbye.txt"
+      Dbox.push(@local)
+
+      # Make some local changes in dir1 and push them, with
+      # subdirs set to dir1
+      Dbox.pull(@alternate)
+      make_file "#{@alternate}/dir1/from_alternate.txt"
+      Dbox.push(@alternate, subdir: 'dir1')
+
+      # Pull
+      result = Dbox.pull(@alternate)
+      result.each do |key, arr|
+        arr.should be_empty
+      end
+    end
+  end
+
   describe 'multiple pushes and pulls' do
     it 'should not get out of sync' do
       Dbox.create(@remote, @local)
