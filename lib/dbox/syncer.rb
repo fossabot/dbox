@@ -33,7 +33,7 @@ module Dbox
     def self.move(new_remote_path, local_path)
       database = Database.load(local_path)
       api.move(database.metadata[:remote_path], new_remote_path)
-      database.update_metadata(:remote_path => new_remote_path)
+      database.update_metadata(remote_path: new_remote_path)
     end
 
     def self.api
@@ -55,18 +55,14 @@ module Dbox
       def practice
         @practice = true
         changes = execute
-        log.debug "Changes that would be executed:\n" + changes.map {|c| c.inspect }.join("\n")
+        log.debug "Changes that would be executed:\n" + changes.map(&:inspect).join("\n")
       ensure
         @practice = false
       end
 
-      def params
-        @params
-      end
+      attr_reader :params
 
-      def api
-        @api
-      end
+      attr_reader :api
 
       def metadata
         @_metadata ||= database.metadata
@@ -96,7 +92,7 @@ module Dbox
       end
 
       def remove_dotfiles(files)
-        files.reject {|f| File.basename(f.path_lower).start_with?(".") }
+        files.reject { |f| File.basename(f.path_lower).start_with?('.') }
       end
 
       def remove_blacklisted_directories(files)
@@ -110,7 +106,7 @@ module Dbox
 
       def remove_blacklisted_extensions(files)
         return files unless blacklisted_extensions
-        files.reject { |f| f.is_a?(Dropbox::FileMetadata) && blacklisted_extensions.include?(File.extname(f.path_lower))}
+        files.reject { |f| f.is_a?(Dropbox::FileMetadata) && blacklisted_extensions.include?(File.extname(f.path_lower)) }
       end
 
       def remote_subdirs
@@ -126,13 +122,11 @@ module Dbox
       end
 
       def entries_hash_by_path
-        out = InsensitiveHash.new
         database.contents.each_with_object(InsensitiveHash.new) do |entry, h|
           next unless entry[:path_lower]
           next if blacklisted_extensions && blacklisted_extensions.include?(File.extname(entry[:path_lower]))
           h[entry[:path_lower]] = entry
         end
-
       end
 
       def entries_hash_by_dropbox_id
@@ -173,22 +167,20 @@ module Dbox
       end
 
       def update_file_timestamp(entry)
-        begin
-          File.utime(Time.now, entry[:modified], entry[:local_path])
-        rescue Errno::ENOENT
-          nil
-        end
+        File.utime(Time.now, entry[:modified], entry[:local_path])
+      rescue Errno::ENOENT
+        nil
       end
 
       def gather_remote_info
         res = api.list_folder(database.metadata[:remote_path], recursive: true, get_all: true)
-        if res.is_a?(Array) && res.all? {|r| r.is_a?(Dropbox::FileMetadata) || r.is_a?(Dropbox::FolderMetadata)}
+        if res.is_a?(Array) && res.all? { |r| r.is_a?(Dropbox::FileMetadata) || r.is_a?(Dropbox::FolderMetadata) }
           res = remove_dotfiles(res)
           res = remove_blacklisted_extensions(res)
           res = remove_blacklisted_directories(res)
           res
         else
-          raise(RuntimeError, "Invalid result from server: #{res.inspect}")
+          raise("Invalid result from server: #{res.inspect}")
         end
       end
 
@@ -202,16 +194,16 @@ module Dbox
       end
 
       def remove_tmpfiles
-        Dir["#{local_path}/.*.part"].each {|f| CaseInsensitiveFile.rm_f(f) }
+        Dir["#{local_path}/.*.part"].each { |f| CaseInsensitiveFile.rm_f(f) }
       end
 
       def sort_changelist(changelist)
         changelist.keys.each do |k|
           case k
           when :failed
-            changelist[k].sort! {|c1, c2| c1[:path] <=> c2[:path] }
+            changelist[k].sort! { |c1, c2| c1[:path] <=> c2[:path] }
           when :moved
-            changelist[k].sort! {|c1, c2| c1[:path] <=> c2[:path] }
+            changelist[k].sort! { |c1, c2| c1[:path] <=> c2[:path] }
           else
             changelist[k].sort!
           end
@@ -240,16 +232,16 @@ module Dbox
           matching_content = contents.detect do |content|
             content.is_a?(Dropbox::FileMetadata) && remote_to_relative_path(content.path_lower) == entry[:path_lower]
           end
-          database.update_entry_by_id(entry[:id], dropbox_id: matching_content.id ) if matching_content
+          database.update_entry_by_id(entry[:id], dropbox_id: matching_content.id) if matching_content
         end
 
         existing_entries_by_path = entries_hash_by_path
         existing_entries_by_dropbox_id = entries_hash_by_dropbox_id
 
         # Filter to the selected subdirs if the subdir param was used
-        contents = contents.select {|c| in_subdir?(remote_to_relative_path(c.path_lower))} if local_subdirs
+        contents = contents.select { |c| in_subdir?(remote_to_relative_path(c.path_lower)) } if local_subdirs
 
-        changelist = {created: [], deleted: [], updated: [], failed: [], moved: []}
+        changelist = { created: [], deleted: [], updated: [], failed: [], moved: [] }
         # process each entry that came back from dropbox/filesystem
         contents.each do |c|
           relative_path = remote_to_relative_path(c.path_lower)
@@ -275,14 +267,14 @@ module Dbox
             }
             create_dir(CaseInsensitiveFile.dirname(local_path_display))
             found_paths << relative_path
-            if entry = existing_entries_by_dropbox_id[c.id]
+            if (entry = existing_entries_by_dropbox_id[c.id])
               changed = false
               # Move if necessary
               current_local_path = relative_to_local_path(entry[:path_lower])
               if current_local_path.downcase != local_path && CaseInsensitiveFile.exist?(current_local_path)
                 log.debug("moving #{current_local_path} to #{local_path_display}")
                 move_file(current_local_path, local_path_display)
-                changelist[:moved] << {entry[:path_lower] => relative_path_display}
+                changelist[:moved] << { entry[:path_lower] => relative_path_display }
                 changed = true
               end
 
@@ -290,7 +282,7 @@ module Dbox
               content_hash = content_hash_file(CaseInsensitiveFile.resolve(local_path))
               if content_hash != c.content_hash
                 log.debug("Updating #{local_path_display}")
-                res = download_file(local_path_display, remote_path, c.size)
+                download_file(local_path_display, remote_path, c.size)
                 changed = true
                 changelist[:updated] << relative_path_display
               end
@@ -300,14 +292,12 @@ module Dbox
               end
             else
               # Create the new file
-              res = download_file(local_path_display, remote_path, c.size)
-              # TODO Add the new file to the DB
+              download_file(local_path_display, remote_path, c.size)
               changelist[:created] << relative_path_display
               log.debug("Creating #{local_path_display}")
               database.add_entry(updated_entry) unless @practice
             end
           end
-
         end
 
         return sort_changelist(changelist) if params[:noclobber]
@@ -319,9 +309,9 @@ module Dbox
         dirs += case_insensitive_difference(local_dirs, found_paths)
 
         dirs.uniq!
-        dirs = dirs.select { |file| in_subdir?(file)} if local_subdirs
+        dirs = dirs.select { |file| in_subdir?(file) } if local_subdirs
         dirs = dirs.reject { |file| blacklisted_extensions.include? File.extname(file) } if blacklisted_extensions
-        log.debug("Deleting these dirs:")
+        log.debug('Deleting these dirs:')
         log.debug(dirs)
         dirs.each do |p|
           delete_file_or_folder_and_db_entry(p, changelist)
@@ -336,7 +326,7 @@ module Dbox
         if CaseInsensitiveFile.exist?(local_path)
           if CaseInsensitiveFile.file?(local_path)
             delete_file(local_path)
-            # TODO remove the entry from the DB
+            # TODO: remove the entry from the DB
           else
             delete_dir(local_path)
           end
@@ -348,7 +338,7 @@ module Dbox
       def modified?(entry, res)
         out = (entry[:revision] != res[:revision]) ||
               !times_equal?(entry[:modified], res[:modified])
-        out ||= (entry[:remote_hash] != res[:remote_hash]) if res.has_key?(:remote_hash)
+        out ||= (entry[:remote_hash] != res[:remote_hash]) if res.key?(:remote_hash)
         log.debug "#{entry[:path]} modified? r#{entry[:revision]} vs. r#{res[:revision]}, h#{entry[:remote_hash]} vs. h#{res[:remote_hash]}, t#{time_to_s(entry[:modified])} vs. t#{time_to_s(res[:modified])} => #{out}"
         out
       end
@@ -388,7 +378,7 @@ module Dbox
 
         # download to temp file
         tmp = generate_tmpfilename(path_lower)
-        CaseInsensitiveFile.open(tmp, "wb") do |f|
+        CaseInsensitiveFile.open(tmp, 'wb') do |f|
           api.get_file(remote_path, f, stream)
         end
 
@@ -397,7 +387,6 @@ module Dbox
 
         true
       end
-
     end
 
     class Push < Operation
@@ -408,18 +397,17 @@ module Dbox
       def execute
         remove_tmpfiles
         dir = database.local_path
-        found_paths = []
 
         # Entries on the file system. Relative paths
         existing_paths = list_contents(dir).sort
-        existing_paths = existing_paths.select { |file| in_subdir?(file)} if local_subdirs
+        existing_paths = existing_paths.select { |file| in_subdir?(file) } if local_subdirs
         existing_paths = existing_paths.reject { |file| blacklisted_extensions.include? File.extname(file) } if blacklisted_extensions
         downcased_existing_paths = existing_paths.map(&:downcase)
 
         # Entries on Dropbox
         remote_contents = gather_remote_info
         # Filter to the selected subdirs if the subdir param was used
-        remote_contents = remote_contents.select {|c| in_subdir?(remote_to_relative_path(c.path_lower))} if local_subdirs
+        remote_contents = remote_contents.select { |c| in_subdir?(remote_to_relative_path(c.path_lower)) } if local_subdirs
 
         # Blow away the entries DB
         database.delete_all_entries
@@ -543,7 +531,7 @@ module Dbox
       def force_metadata_update_from_server(entry)
         res = gather_remote_info
         unless res == :not_modified
-          database.update_entry_by_path(entry[:path], :modified => res[:modified], :revision => res[:revision], :remote_hash => res[:remote_hash])
+          database.update_entry_by_path(entry[:path], modified: res[:modified], revision: res[:revision], remote_hash: res[:remote_hash])
         end
         update_file_timestamp(database.find_by_path(entry[:path]))
       end
