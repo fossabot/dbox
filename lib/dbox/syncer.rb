@@ -410,7 +410,7 @@ module Dbox
         remote_contents = remote_contents.select { |c| in_subdir?(remote_to_relative_path(c.path_lower)) } if local_subdirs
 
         # Blow away the entries DB
-        database.delete_all_entries
+        database.delete_all_entries(local_subdirs)
 
         changelist = { created: [],
                        deleted: [],
