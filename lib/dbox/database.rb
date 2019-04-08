@@ -368,8 +368,17 @@ module Dbox
       end
     end
 
-    def delete_all_entries
-      @db.execute('DELETE FROM entries;')
+    # When you push, you only want to delete entries in the subdirs
+    # you are pushing to. Otherwise you blow away all of the other
+    # entries in the DB, and the next sync will be really long.
+    def delete_all_entries(local_subdirs = nil)
+      if local_subdirs
+        local_subdirs.each do |subdir|
+          @db.execute("DELETE FROM entries where path_lower like '#{subdir}%'")
+        end
+      else
+        @db.execute('DELETE FROM entries;')
+      end
     end
 
     private
