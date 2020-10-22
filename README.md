@@ -1,3 +1,5 @@
+[![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2Fspatten%2Fdbox.svg?type=shield)](https://app.fossa.com/projects/git%2Bgithub.com%2Fspatten%2Fdbox?ref=badge_shield)
+
 dbox
 ====
 
@@ -247,3 +249,7 @@ $ export DROPBOX_USER_ID=pqej9rmnj0i1gcxr4
 > File.read("#{ENV['HOME']}/Dropbox/Public/hello.txt")
 => "Oh, Hello"
 ```
+
+
+## License
+[![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2Fspatten%2Fdbox.svg?type=large)](https://app.fossa.com/projects/git%2Bgithub.com%2Fspatten%2Fdbox?ref=badge_large)
